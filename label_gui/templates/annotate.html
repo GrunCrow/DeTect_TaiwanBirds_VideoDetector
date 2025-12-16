@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Annotation Tool</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="annotate-page">
+    <div class="annotate-container">
+        <!-- Header -->
+        <header class="annotate-header">
+            <div class="header-content">
+                <h1>🎯 Video Frame Annotation</h1>
+                <div class="header-stats">
+                    <span id="videoInfo">Loading...</span>
+                    <span id="frameInfo">Loading...</span>
+                </div>
+            </div>
+            <a href="/" class="btn btn-secondary">← Back to Setup</a>
+        </header>
+
+        <!-- Main Content -->
+        <div class="annotate-content">
+            <!-- Left Panel: Detection & Video -->
+            <aside class="left-panel">
+                <div class="panel-card">
+                    <h3>📸 Detection Preview</h3>
+                    <img id="detectionImage" src="" alt="Detection preview" class="media-display">
+                </div>
+
+                <div class="panel-card">
+                    <h3>🎬 Video Player</h3>
+                    <video id="videoPlayer" class="media-display" controls>
+                        Your browser does not support the video tag.
+                    </video>
+                    <div class="video-controls">
+                        <button onclick="showFrameTime()" class="btn btn-sm btn-primary">⏱️ Show Frame Time</button>
+                    </div>
+                </div>
+
+                <div class="panel-card">
+                    <h3>📊 Annotation Stats</h3>
+                    <div id="statsPanel" class="stats-panel">
+                        <div class="stat-item">
+                            <span class="stat-label">Total Frames:</span>
+                            <span id="totalFrames" class="stat-value">0</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Annotated:</span>
+                            <span id="annotatedCount" class="stat-value">0</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Right Panel: Frame & Canvas -->
+            <main class="canvas-section">
+                <div class="canvas-toolbar">
+                    <div class="toolbar-group">
+                        <label for="classSelect">Class:</label>
+                        <select id="classSelect" class="form-control">
+                            <!-- Populated by JS -->
+                        </select>
+                    </div>
+
+                    <div class="toolbar-group">
+                        <button onclick="resetZoom()" class="btn btn-sm btn-secondary" title="Reset zoom to fit">🔍 Reset Zoom</button>
+                        <span id="zoomLevel" class="zoom-display">100%</span>
+                    </div>
+
+                    <div class="toolbar-group">
+                        <button onclick="prevFrame()" class="btn btn-sm btn-secondary" title="Left arrow or ← key">◀ Prev</button>
+                        <span id="currentFrameDisplay" class="frame-display">0/0</span>
+                        <button onclick="nextFrame()" class="btn btn-sm btn-secondary" title="Right arrow or → key">Next ▶</button>
+                    </div>
+
+                    <div class="toolbar-group">
+                        <button onclick="deleteLastBox()" class="btn btn-sm btn-danger" title="Del or Backspace">🗑️ Delete</button>
+                        <button onclick="clearAllBoxes()" class="btn btn-sm btn-danger">Clear All</button>
+                    </div>
+                </div>
+
+                <div class="canvas-container">
+                    <canvas id="annotationCanvas"></canvas>
+                    <div id="canvasTooltip" class="canvas-tooltip hidden"></div>
+                </div>
+
+                <div class="canvas-hints">
+                    <p><strong>🖱️ Controls:</strong> Click & drag to draw | <strong>🔄 Zoom:</strong> Mouse wheel | <strong>🖐️ Pan:</strong> Middle mouse button | <strong>⌨️ Keys:</strong> ← → (navigate), Del (delete)</p>
+                </div>
+            </main>
+        </div>
+
+        <!-- Bottom Controls -->
+        <footer class="annotate-footer">
+            <div class="footer-actions">
+                <button onclick="prevVideo()" class="btn btn-primary" title="Previous video">◀◀ Prev Video</button>
+                <button onclick="nextVideo()" class="btn btn-primary" title="Next video">Next Video ▶▶</button>
+                <button onclick="saveAndExit()" class="btn btn-success btn-lg" title="Save all annotations and exit">💾 Save All & Exit</button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Modals -->
+    <div id="loadingModal" class="modal hidden">
+        <div class="modal-content">
+            <div class="spinner"></div>
+            <p id="loadingText">Loading...</p>
+        </div>
+    </div>
+
+    <div id="confirmModal" class="modal hidden">
+        <div class="modal-content modal-confirm">
+            <h3 id="confirmTitle">Confirm</h3>
+            <p id="confirmMessage"></p>
+            <div class="modal-buttons">
+                <button onclick="confirmYes()" class="btn btn-primary">Yes</button>
+                <button onclick="confirmNo()" class="btn btn-secondary">No</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/annotate.js') }}"></script>
+</body>
+</html>

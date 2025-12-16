@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Annotation Tool</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🎬 Video Annotation Tool for YOLO Training</h1>
+            <p>Professional annotation with zoom, pan, and multi-class support</p>
+        </header>
+
+        <main class="setup-section">
+            <div class="card">
+                <div class="card-header">
+                    <h2>📁 Setup Annotation Project</h2>
+                </div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="inputDir">Input Directory (Videos & Detection Images):</label>
+                        <div class="input-group">
+                            <input type="text" id="inputDir" placeholder="e.g., G:\2025-04-15_videos" class="form-control">
+                            <button onclick="browseFolder('inputDir')" class="btn btn-secondary">📂 Browse</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="outputDir">Output Directory (Annotations):</label>
+                        <div class="input-group">
+                            <input type="text" id="outputDir" placeholder="Auto-filled with _annotated suffix" class="form-control">
+                            <button onclick="browseFolder('outputDir')" class="btn btn-secondary">📂 Browse</button>
+                        </div>
+                    </div>
+
+                    <div class="form-group form-inline">
+                        <label for="numFrames">Number of Frames to Extract:</label>
+                        <input type="number" id="numFrames" min="1" max="100" value="10" class="form-control narrow">
+                    </div>
+
+                    <button onclick="initAnnotation()" class="btn btn-primary btn-lg">
+                        🚀 Load Videos & Start Annotation
+                    </button>
+                </div>
+            </div>
+
+            <div id="successMessage" class="message message-success hidden">
+                <div class="message-content">
+                    <span id="successText"></span>
+                    <a href="/annotate" class="link">Go to Annotation Tool →</a>
+                </div>
+            </div>
+
+            <div id="errorMessage" class="message message-error hidden">
+                <div class="message-content">
+                    <span id="errorText"></span>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer">
+            <p>Video Annotation Tool © 2025 | YOLO Training Dataset Generator</p>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script>
+        // Auto-fill output directory when input directory changes
+        document.getElementById('inputDir').addEventListener('change', function() {
+            const inputDir = this.value;
+            if (inputDir) {
+                const outputDir = inputDir + '_annotated';
+                document.getElementById('outputDir').value = outputDir;
+            }
+        });
+
+        function browseFolder(fieldId) {
+            // Note: This requires a file picker - for web, this would need Electron or similar
+            alert('Please paste the full folder path directly into the input field.\n\nExample:\nG:\\2025-04-15_videos');
+        }
+
+        async function initAnnotation() {
+            const inputDir = document.getElementById('inputDir').value.trim();
+            const outputDir = document.getElementById('outputDir').value.trim();
+            const numFrames = parseInt(document.getElementById('numFrames').value);
+
+            if (!inputDir || !outputDir) {
+                showError('Please fill in all fields');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/init', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        input_dir: inputDir,
+                        output_dir: outputDir,
+                        num_frames: numFrames
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showSuccess(`${data.message} Ready to annotate!`);
+                    setTimeout(() => {
+                        window.location.href = '/annotate';
+                    }, 1500);
+                } else {
+                    showError(data.error || 'Failed to initialize');
+                }
+            } catch (error) {
+                showError('Connection error: ' + error.message);
+            }
+        }
+
+        function showSuccess(message) {
+            document.getElementById('successText').textContent = message;
+            document.getElementById('successMessage').classList.remove('hidden');
+            document.getElementById('errorMessage').classList.add('hidden');
+        }
+
+        function showError(message) {
+            document.getElementById('errorText').textContent = message;
+            document.getElementById('errorMessage').classList.remove('hidden');
+            document.getElementById('successMessage').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>

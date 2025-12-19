@@ -112,11 +112,7 @@ class VideoAnnotatorGUI:
         self.input_dir = tk.StringVar()
         self.output_dir = tk.StringVar()
         self.num_frames = tk.IntVar(value=10)
-        self.frame_increment_mode = tk.StringVar(value="stride")  # "stride", "distributed"
-        self.frame_inclusion_count = tk.IntVar(value=5)
-        self.frame_inclusion_stride = tk.IntVar(value=5)
-        self.frame_inclusion_direction = tk.StringVar(value="next")  # "next", "prev"
-        self.frame_distributed_scope = tk.StringVar(value="all")  # "all", "missing"
+        self.frame_increment_mode = tk.StringVar(value="stride")  # "stride" or "distributed"
         
         self.video_files = []  # List of video basenames
         self.current_video_idx = 0
@@ -650,45 +646,39 @@ class VideoAnnotatorGUI:
         # Row 3: Frame management
         row3_frame = tk.Frame(controls_frame, bg=self.colors['bg_secondary'])
         row3_frame.pack(fill=tk.X, pady=5)
-
-        # --- Frame inclusion options ---
-        tk.Label(row3_frame, text="Add Frames:", font=('Segoe UI', 9, 'bold'), bg=self.colors['bg_secondary']).pack(side=tk.LEFT, padx=2)
-        tk.Spinbox(row3_frame, from_=1, to=100, textvariable=self.frame_inclusion_count, width=3, font=('Segoe UI', 9)).pack(side=tk.LEFT)
-
-        # Mode radio buttons
-        for mode, label in [("stride", "Stride"), ("distributed", "Distributed")]:
-            tk.Radiobutton(row3_frame, text=label, variable=self.frame_increment_mode, value=mode, font=('Segoe UI', 9), bg=self.colors['bg_secondary']).pack(side=tk.LEFT, padx=2)
-
-        # Direction radio buttons (only for stride)
-        for direction, label in [("next", "Next"), ("prev", "Prev")]:
-            tk.Radiobutton(row3_frame, text=label, variable=self.frame_inclusion_direction, value=direction, font=('Segoe UI', 9), bg=self.colors['bg_secondary']).pack(side=tk.LEFT, padx=1)
-
-        # Stride spinbox (only for stride)
-        tk.Label(row3_frame, text="Stride:", font=('Segoe UI', 9), bg=self.colors['bg_secondary']).pack(side=tk.LEFT, padx=1)
-        tk.Spinbox(row3_frame, from_=1, to=50, textvariable=self.frame_inclusion_stride, width=2, font=('Segoe UI', 9)).pack(side=tk.LEFT)
-
-        # Distributed scope (only for distributed)
-        tk.Label(row3_frame, text="Scope:", font=('Segoe UI', 9), bg=self.colors['bg_secondary']).pack(side=tk.LEFT, padx=1)
-        for scope, label in [("all", "All Video"), ("missing", "Missing Only")]:
-            tk.Radiobutton(row3_frame, text=label, variable=self.frame_distributed_scope, value=scope, font=('Segoe UI', 9), bg=self.colors['bg_secondary']).pack(side=tk.LEFT, padx=1)
-
-        # Add frames button
-        tk.Button(row3_frame, text="➕ Add", command=self.increase_frames_for_video, font=('Segoe UI', 9, 'bold'), bg='#8b5cf6', fg='white', relief=tk.FLAT, bd=0, padx=10, pady=5, cursor='hand2', activebackground='#7c3aed').pack(side=tk.LEFT, padx=2)
-
+        
+        tk.Button(row3_frame, text="➕ Increase Frames +5", 
+                 command=self.increase_frames_for_video,
+                 font=('Segoe UI', 9, 'bold'),
+                 bg='#8b5cf6',
+                 fg='white',
+                 relief=tk.FLAT,
+                 bd=0,
+                 padx=10,
+                 pady=5,
+                 cursor='hand2',
+                 activebackground='#7c3aed').pack(side=tk.LEFT, padx=2)
+        
+        # Frame increment mode selector
+        tk.Label(row3_frame, text="Mode:", 
+                font=('Segoe UI', 9, 'bold'),
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['text_primary']).pack(side=tk.LEFT, padx=5)
+        
+        mode_dropdown = ttk.Combobox(row3_frame, textvariable=self.frame_increment_mode,
+                                      values=["stride", "distributed"], state="readonly", width=12,
+                                      font=('Segoe UI', 9))
+        mode_dropdown.pack(side=tk.LEFT, padx=2)
+        
         # Frame count display label
-        self.frame_count_label = tk.Label(row3_frame, text="Frames: 10", font=('Segoe UI', 9, 'bold'), bg=self.colors['bg_secondary'], fg=self.colors['text_secondary'], relief=tk.FLAT)
+        self.frame_count_label = tk.Label(row3_frame, text="Frames: 10", 
+                                         font=('Segoe UI', 9, 'bold'),
+                                         bg=self.colors['bg_secondary'],
+                                         fg=self.colors['text_secondary'],
+                                         relief=tk.FLAT)
         self.frame_count_label.pack(side=tk.LEFT, padx=10)
-
-        # --- Video seek bar and explorer button ---
-        seek_frame = tk.Frame(left_panel, bg=self.colors['bg_secondary'])
-        seek_frame.pack(fill=tk.X, pady=(5, 0))
-        self.video_seek_var = tk.DoubleVar(value=0.0)
-        self.video_seek_slider = tk.Scale(seek_frame, from_=0, to=100, orient=tk.HORIZONTAL, variable=self.video_seek_var, showvalue=0, length=340, command=self.on_video_seek, bg=self.colors['bg_secondary'])
-        self.video_seek_slider.pack(side=tk.LEFT, padx=5)
-        self.video_time_label = tk.Label(seek_frame, text="00:00 / 00:00", font=('Segoe UI', 9), bg=self.colors['bg_secondary'])
-        self.video_time_label.pack(side=tk.LEFT, padx=2)
-        # Explorer button
-        tk.Button(seek_frame, text="Show in Explorer", command=self.open_video_in_explorer, font=('Segoe UI', 9), bg=self.colors['primary'], fg='white', relief=tk.FLAT, bd=0, padx=8, pady=2, cursor='hand2', activebackground=self.colors['primary_dark']).pack(side=tk.LEFT, padx=5)
+        
+        # Video playback
         self.video_playing = False
         self.video_cap = None
         

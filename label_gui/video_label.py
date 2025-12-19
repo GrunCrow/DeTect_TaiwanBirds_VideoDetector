@@ -1,3 +1,5 @@
+# TODO: Add possibility to add camera name or ID in the output file names
+
 import os
 import csv
 import json
@@ -110,12 +112,20 @@ class VideoAnnotatorGUI:
         self.input_dir = tk.StringVar()
         self.output_dir = tk.StringVar()
         self.num_frames = tk.IntVar(value=10)
+        self.frame_increment_mode = tk.StringVar(value="stride")  # "stride", "distributed"
+        self.frame_inclusion_count = tk.IntVar(value=5)
+        self.frame_inclusion_stride = tk.IntVar(value=5)
+        self.frame_inclusion_direction = tk.StringVar(value="next")  # "next", "prev"
+        self.frame_distributed_scope = tk.StringVar(value="all")  # "all", "missing"
         
         self.video_files = []  # List of video basenames
         self.current_video_idx = 0
         self.current_frame_idx = 0
         self.extracted_frames = []  # List of (frame_number, frame_image)
         self.current_class = tk.StringVar(value="Bird")
+        
+        # Per-video frame count overrides: {video_basename: custom_frame_count}
+        self.video_frame_counts = {}
         
         # Bounding boxes for current frame: list of (class_id, x1, y1, x2, y2)
         self.current_bboxes = []
@@ -134,9 +144,18 @@ class VideoAnnotatorGUI:
         self.pan_start_x = 0
         self.pan_start_y = 0
         
-        # Detection image zoom state
+        # Detection image zoom and pan state
         self.detection_zoom = 1.0
         self.detection_img_original = None
+        self.detection_pan_x = 0
+        self.detection_pan_y = 0
+        self.detection_panning = False
+        self.detection_pan_start_x = 0
+        self.detection_pan_start_y = 0
+        
+        # Image cache for zoomed display to avoid repeated PIL resizing
+        self.cached_zoomed_img = None
+        self.cached_zoom_level = None
         
         self.setup_ui()
     
@@ -205,7 +224,7 @@ class VideoAnnotatorGUI:
         
         header_title = tk.Label(
             header_frame,
-            text="🎬 Video Annotation Tool for YOLO Training",
+            text="🎬 Video-frames annotator",
             font=('Segoe UI', 16, 'bold'),
             bg=self.colors['primary'],
             fg='white'
@@ -214,7 +233,7 @@ class VideoAnnotatorGUI:
         
         header_subtitle = tk.Label(
             header_frame,
-            text="Professional annotation with zoom, pan, and multi-class support",
+            text="Draw a bounding box around each target in the video frames",
             font=('Segoe UI', 9),
             bg=self.colors['primary'],
             fg='white'
@@ -348,6 +367,11 @@ class VideoAnnotatorGUI:
         self.detection_canvas.bind("<Button-4>", self.on_detection_zoom)  # Linux scroll up
         self.detection_canvas.bind("<Button-5>", self.on_detection_zoom)  # Linux scroll down
         self.detection_canvas.bind("<Double-Button-1>", self.reset_detection_zoom)  # Double-click to reset
+        
+        # Bind middle-click for detection panning
+        self.detection_canvas.bind("<ButtonPress-2>", self.on_detection_pan_start)
+        self.detection_canvas.bind("<B2-Motion>", self.on_detection_pan_drag)
+        self.detection_canvas.bind("<ButtonRelease-2>", self.on_detection_pan_end)
         
         # Video card
         video_card = tk.Frame(left_panel, bg=self.colors['bg_primary'], relief=tk.FLAT)
@@ -623,7 +647,48 @@ class VideoAnnotatorGUI:
                                   pady=4)
         self.zoom_label.pack(side=tk.RIGHT, padx=5)
         
-        # Video playback
+        # Row 3: Frame management
+        row3_frame = tk.Frame(controls_frame, bg=self.colors['bg_secondary'])
+        row3_frame.pack(fill=tk.X, pady=5)
+
+        # --- Frame inclusion options ---
+        tk.Label(row3_frame, text="Add Frames:", font=('Segoe UI', 9, 'bold'), bg=self.colors['bg_secondary']).pack(side=tk.LEFT, padx=2)
+        tk.Spinbox(row3_frame, from_=1, to=100, textvariable=self.frame_inclusion_count, width=3, font=('Segoe UI', 9)).pack(side=tk.LEFT)
+
+        # Mode radio buttons
+        for mode, label in [("stride", "Stride"), ("distributed", "Distributed")]:
+            tk.Radiobutton(row3_frame, text=label, variable=self.frame_increment_mode, value=mode, font=('Segoe UI', 9), bg=self.colors['bg_secondary']).pack(side=tk.LEFT, padx=2)
+
+        # Direction radio buttons (only for stride)
+        for direction, label in [("next", "Next"), ("prev", "Prev")]:
+            tk.Radiobutton(row3_frame, text=label, variable=self.frame_inclusion_direction, value=direction, font=('Segoe UI', 9), bg=self.colors['bg_secondary']).pack(side=tk.LEFT, padx=1)
+
+        # Stride spinbox (only for stride)
+        tk.Label(row3_frame, text="Stride:", font=('Segoe UI', 9), bg=self.colors['bg_secondary']).pack(side=tk.LEFT, padx=1)
+        tk.Spinbox(row3_frame, from_=1, to=50, textvariable=self.frame_inclusion_stride, width=2, font=('Segoe UI', 9)).pack(side=tk.LEFT)
+
+        # Distributed scope (only for distributed)
+        tk.Label(row3_frame, text="Scope:", font=('Segoe UI', 9), bg=self.colors['bg_secondary']).pack(side=tk.LEFT, padx=1)
+        for scope, label in [("all", "All Video"), ("missing", "Missing Only")]:
+            tk.Radiobutton(row3_frame, text=label, variable=self.frame_distributed_scope, value=scope, font=('Segoe UI', 9), bg=self.colors['bg_secondary']).pack(side=tk.LEFT, padx=1)
+
+        # Add frames button
+        tk.Button(row3_frame, text="➕ Add", command=self.increase_frames_for_video, font=('Segoe UI', 9, 'bold'), bg='#8b5cf6', fg='white', relief=tk.FLAT, bd=0, padx=10, pady=5, cursor='hand2', activebackground='#7c3aed').pack(side=tk.LEFT, padx=2)
+
+        # Frame count display label
+        self.frame_count_label = tk.Label(row3_frame, text="Frames: 10", font=('Segoe UI', 9, 'bold'), bg=self.colors['bg_secondary'], fg=self.colors['text_secondary'], relief=tk.FLAT)
+        self.frame_count_label.pack(side=tk.LEFT, padx=10)
+
+        # --- Video seek bar and explorer button ---
+        seek_frame = tk.Frame(left_panel, bg=self.colors['bg_secondary'])
+        seek_frame.pack(fill=tk.X, pady=(5, 0))
+        self.video_seek_var = tk.DoubleVar(value=0.0)
+        self.video_seek_slider = tk.Scale(seek_frame, from_=0, to=100, orient=tk.HORIZONTAL, variable=self.video_seek_var, showvalue=0, length=340, command=self.on_video_seek, bg=self.colors['bg_secondary'])
+        self.video_seek_slider.pack(side=tk.LEFT, padx=5)
+        self.video_time_label = tk.Label(seek_frame, text="00:00 / 00:00", font=('Segoe UI', 9), bg=self.colors['bg_secondary'])
+        self.video_time_label.pack(side=tk.LEFT, padx=2)
+        # Explorer button
+        tk.Button(seek_frame, text="Show in Explorer", command=self.open_video_in_explorer, font=('Segoe UI', 9), bg=self.colors['primary'], fg='white', relief=tk.FLAT, bd=0, padx=8, pady=2, cursor='hand2', activebackground=self.colors['primary_dark']).pack(side=tk.LEFT, padx=5)
         self.video_playing = False
         self.video_cap = None
         
@@ -704,7 +769,8 @@ class VideoAnnotatorGUI:
         progress_file = self.get_progress_file_path()
         progress_data = {
             "last_video_idx": self.current_video_idx,
-            "total_videos": len(self.video_files)
+            "total_videos": len(self.video_files),
+            "video_frame_counts": self.video_frame_counts
         }
         try:
             with open(progress_file, 'w') as f:
@@ -720,6 +786,8 @@ class VideoAnnotatorGUI:
                 with open(progress_file, 'r') as f:
                     progress_data = json.load(f)
                     last_idx = progress_data.get("last_video_idx", 0)
+                    # Load per-video frame counts if available
+                    self.video_frame_counts = progress_data.get("video_frame_counts", {})
                     # Only resume if the last index is valid
                     if 0 <= last_idx < len(self.video_files):
                         self.current_video_idx = last_idx
@@ -774,11 +842,70 @@ class VideoAnnotatorGUI:
             messagebox.showerror("Error", f"Video not found: {self.video_path}")
             return
         
-        # Extract frames
-        self.extracted_frames = extract_frames_from_video(self.video_path, self.num_frames.get())
-        
+        # Get frame count for this specific video, or use global setting
+        frame_count = self.video_frame_counts.get(basename, self.num_frames.get())
+
+        # Preload existing saved frames for this video from disk first
+        output_path = self.output_dir.get()
+        images_dir = os.path.join(output_path, "images")
+        existing_frames = []  # list[(frame_idx, frame_img)]
+        existing_indices = set()
+
+        if os.path.exists(images_dir):
+            prefix = f"{basename}_"
+            for fname in os.listdir(images_dir):
+                if fname.startswith(prefix) and fname.lower().endswith('.jpg'):
+                    name_wo_ext = os.path.splitext(fname)[0]
+                    try:
+                        idx_str = name_wo_ext.split('_')[-1]
+                        idx = int(idx_str)
+                    except Exception:
+                        continue
+                    img_path = os.path.join(images_dir, fname)
+                    img = cv2.imread(img_path)
+                    if img is not None:
+                        existing_frames.append((idx, img))
+                        existing_indices.add(idx)
+
+        # Sort existing frames by index
+        existing_frames.sort(key=lambda x: x[0])
+
+        # Determine total frames in video
+        cap = cv2.VideoCapture(self.video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+
+        # Helper to compute equally distributed indices
+        def compute_indices(n):
+            if n <= 0:
+                return []
+            if n >= total_frames:
+                return list(range(total_frames))
+            step = (total_frames - 1) / (n - 1) if n > 1 else 0
+            return [int(i * step) for i in range(n)]
+
+        # If we already have enough existing frames on disk, use them
+        self.extracted_frames = existing_frames[:]
+
+        if len(self.extracted_frames) < frame_count:
+            # Compute desired target indices and extract only the missing ones
+            target_indices = compute_indices(frame_count)
+            missing = [i for i in target_indices if i not in existing_indices]
+
+            # Extract missing frames from the video
+            cap = cv2.VideoCapture(self.video_path)
+            for idx in missing:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                ret, frame = cap.read()
+                if ret:
+                    self.extracted_frames.append((idx, frame))
+            cap.release()
+
+            # Sort combined frames by frame index
+            self.extracted_frames.sort(key=lambda x: x[0])
+
         if not self.extracted_frames:
-            messagebox.showerror("Error", f"Could not extract frames from: {self.video_path}")
+            messagebox.showerror("Error", f"Could not extract or load frames for: {self.video_path}")
             return
         
         self.current_frame_idx = 0
@@ -789,6 +916,11 @@ class VideoAnnotatorGUI:
         self.pan_y = 0
         self.detection_zoom = 1.0  # Reset detection preview zoom
         
+        # Reset per-video display size lock so frames share same scaling
+        self.display_size_locked = False
+        self.display_width_base = None
+        self.display_height_base = None
+
         # Update UI
         self.update_info_label()
         self.display_detection_image()
@@ -808,11 +940,103 @@ class VideoAnnotatorGUI:
         )
         self.video_label.config(text=f"Video: {basename}.mp4")
         
+        # Update frame count label
+        self.frame_count_label.config(text=f"Frames: {total_frames}")
+        
         # Update progress bar
         self.update_progress_bar()
     
+    def increase_frames_for_video(self):
+        """Add 5 frames using selected mode: stride (spaced) or distributed (evenly spread)"""
+        if not self.video_files or not self.extracted_frames:
+            self.update_status("⚠️ No videos loaded", '#f59e0b')
+            return
+        
+        basename = self.video_files[self.current_video_idx]
+        
+        # Get the current frame number being displayed
+        current_frame_number, _ = self.extracted_frames[self.current_frame_idx]
+        
+        # Determine total frames available in video
+        cap = cv2.VideoCapture(self.video_path)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.release()
+        
+        existing_indices = {idx for idx, _ in self.extracted_frames}
+        mode = self.frame_increment_mode.get()
+        
+        needed = []
+        
+        if mode == "stride":
+            # Add 5 frames with spacing (stride=5) to reduce similarity
+            stride = 5
+            frame_num = current_frame_number + stride
+            
+            while len(needed) < 5 and frame_num < total_frames:
+                if frame_num not in existing_indices:
+                    needed.append(frame_num)
+                frame_num += stride
+            
+            mode_desc = f"stride={stride}"
+        else:  # distributed
+            # Add 5 frames evenly distributed from current_frame to end of video
+            remaining = total_frames - current_frame_number - 1
+            if remaining <= 5:
+                # Not enough frames, just take all remaining
+                needed = [i for i in range(current_frame_number + 1, total_frames) 
+                         if i not in existing_indices]
+            else:
+                # Distribute 5 frames evenly
+                step = remaining // 5
+                for i in range(1, 6):
+                    frame_num = current_frame_number + (i * step)
+                    if frame_num < total_frames and frame_num not in existing_indices:
+                        needed.append(frame_num)
+            
+            mode_desc = "distributed"
+        
+        if not needed:
+            self.update_status("ℹ️ No new frames available.", '#f59e0b')
+            return
+        
+        needed = sorted(set(needed))
+        
+        try:
+            self.update_status(f"⏳ Extracting {len(needed)} frame(s) ({mode_desc}) for {basename}...", '#0066cc')
+            self.master.update()
+            
+            cap = cv2.VideoCapture(self.video_path)
+            added = 0
+            for idx in needed:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                ret, frame = cap.read()
+                if ret:
+                    self.extracted_frames.append((idx, frame))
+                    added += 1
+            cap.release()
+            
+            if added == 0:
+                self.update_status("❌ Failed to extract additional frames", '#ef4444')
+                return
+            
+            # Sort frames by index
+            self.extracted_frames.sort(key=lambda x: x[0])
+            new_frame_count = len(self.extracted_frames)
+            self.video_frame_counts[basename] = new_frame_count
+            
+            # Save newly added frames to disk
+            self.save_all_frames_of_current_video()
+            
+            # Refresh UI
+            self.update_info_label()
+            self.display_current_frame()
+            
+            self.update_status(f"✅ Added {added} frame(s) ({mode_desc}). Total now: {new_frame_count}", '#10b981')
+        except Exception as e:
+            self.update_status(f"❌ Error: {str(e)}", '#ef4444')
+    
     def display_detection_image(self):
-        """Display the detection preview image with zoom support"""
+        """Display the detection preview image with zoom and pan support"""
         if os.path.exists(self.detection_img_path):
             # Load original image
             self.detection_img_original = Image.open(self.detection_img_path)
@@ -827,9 +1051,20 @@ class VideoAnnotatorGUI:
             self.detection_photo = ImageTk.PhotoImage(img)
             
             self.detection_canvas.delete("all")
-            # Center the image
-            canvas_center_x = 175
-            canvas_center_y = 125
+            # Place image with pan offset (default center if not zoomed)
+            if self.detection_zoom <= 1.0:
+                # If zoomed out, center the image
+                canvas_center_x = 175
+                canvas_center_y = 125
+            else:
+                # If zoomed in, use pan offset (default to center if not yet panned)
+                if self.detection_pan_x == 0 and self.detection_pan_y == 0:
+                    canvas_center_x = 175
+                    canvas_center_y = 125
+                else:
+                    canvas_center_x = 175 + self.detection_pan_x
+                    canvas_center_y = 125 + self.detection_pan_y
+            
             self.detection_canvas.create_image(canvas_center_x, canvas_center_y, 
                                              anchor=tk.CENTER, image=self.detection_photo)
             
@@ -857,13 +1092,26 @@ class VideoAnnotatorGUI:
             self.display_video_frame(frame)
     
     def display_video_frame(self, frame):
-        """Display a frame in the video canvas"""
+        """Display a frame in the video canvas with timestamp"""
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(frame_rgb)
         img = img.resize((350, 250), Image.Resampling.LANCZOS)
         self.video_photo = ImageTk.PhotoImage(img)
         self.video_canvas.delete("all")
         self.video_canvas.create_image(0, 0, anchor=tk.NW, image=self.video_photo)
+        
+        # Display timestamp during playback
+        if self.video_playing and self.video_cap:
+            current_frame_idx = int(self.video_cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1  # Subtract 1 because frame was just read
+            fps = self.video_cap.get(cv2.CAP_PROP_FPS)
+            if fps > 0:
+                timestamp_sec = current_frame_idx / fps
+                minutes = int(timestamp_sec // 60)
+                seconds = timestamp_sec % 60
+                timestamp = f"{minutes:02d}:{seconds:05.2f}"
+                self.video_canvas.create_text(340, 240, text=timestamp, fill="yellow", anchor=tk.SE,
+                                             font=('Segoe UI', 10, 'bold'))
+
     
     def play_video(self):
         """Play the video"""
@@ -905,8 +1153,10 @@ class VideoAnnotatorGUI:
         messagebox.showinfo("Frame Timestamp", 
                            f"Current frame occurs at: {timestamp}")
     
-    def display_current_frame(self):
-        """Display the current frame for annotation"""
+    def display_current_frame(self, preserve_view: bool = False):
+        """Display the current frame for annotation.
+        preserve_view: when True, keep current zoom and pan across frames.
+        """
         if not self.extracted_frames:
             return
         
@@ -929,22 +1179,40 @@ class VideoAnnotatorGUI:
         canvas_height = max(actual_canvas_height, 100)
         
         # Calculate display size to fit canvas while maintaining aspect ratio
-        aspect_ratio = self.frame_width / self.frame_height
-        canvas_aspect = canvas_width / canvas_height
-        
-        if aspect_ratio > canvas_aspect:
-            # Image is wider - fit to width
-            display_width = canvas_width
-            display_height = int(canvas_width / aspect_ratio)
+        # Keep display size consistent across frames of the same video to avoid bbox shifts
+        if getattr(self, 'display_size_locked', False) and self.display_width_base and self.display_height_base:
+            display_width = self.display_width_base
+            display_height = self.display_height_base
         else:
-            # Image is taller - fit to height
-            display_height = canvas_height
-            display_width = int(canvas_height * aspect_ratio)
+            aspect_ratio = self.frame_width / self.frame_height
+            canvas_aspect = canvas_width / canvas_height
+            
+            if aspect_ratio > canvas_aspect:
+                # Image is wider - fit to width
+                display_width = canvas_width
+                display_height = int(canvas_width / aspect_ratio)
+            else:
+                # Image is taller - fit to height
+                display_height = canvas_height
+                display_width = int(canvas_height * aspect_ratio)
+            # Cache and lock for this video
+            self.display_width_base = display_width
+            self.display_height_base = display_height
+            self.display_size_locked = True
         
         self.display_width = display_width
         self.display_height = display_height
+
+        # Base scale factors between original frame and fitted display image
+        # These remain constant for a given video while display size is locked
+        self.base_scale_x = self.display_width / float(self.frame_width)
+        self.base_scale_y = self.display_height / float(self.frame_height)
         
-        # Load existing annotations AFTER display_width is set
+        # Invalidate zoomed image cache when switching frames
+        self.cached_zoomed_img = None
+        self.cached_zoom_level = None
+        
+        # Load existing annotations AFTER display_width is set (base_scale available)
         self.load_existing_annotations()
         
         # Minimum zoom should be 1.0 (or less if needed to fit in canvas)
@@ -959,9 +1227,17 @@ class VideoAnnotatorGUI:
         # Store original display image
         self.base_display_img = img.resize((display_width, display_height), Image.Resampling.LANCZOS)
         
-        # Reset zoom and pan to fit image
-        self.zoom_level = self.min_zoom
-        self.center_image()
+        if preserve_view:
+            # Keep current zoom/pan, but ensure not below min
+            if not hasattr(self, 'zoom_level'):
+                self.zoom_level = self.min_zoom
+            else:
+                self.zoom_level = max(self.zoom_level, self.min_zoom)
+            # keep pan as-is
+        else:
+            # Reset zoom and pan to fit image
+            self.zoom_level = self.min_zoom
+            self.center_image()
         
         # Apply zoom and pan
         self.update_zoomed_image()
@@ -969,7 +1245,9 @@ class VideoAnnotatorGUI:
         self.update_info_label()
     
     def load_existing_annotations(self):
-        """Load existing annotations for the current frame"""
+        """Load existing annotations for the current frame.
+        Stores boxes internally in ORIGINAL image pixel coordinates (x1,y1,x2,y2).
+        """
         basename = self.video_files[self.current_video_idx]
         frame_number, _ = self.extracted_frames[self.current_frame_idx]
         frame_name = f"{basename}_{frame_number}"
@@ -989,14 +1267,19 @@ class VideoAnnotatorGUI:
                         y_center = float(parts[2])
                         width = float(parts[3])
                         height = float(parts[4])
-                        
-                        # Convert normalized coords to pixel coords (display size)
-                        x1 = int((x_center - width/2) * self.display_width)
-                        y1 = int((y_center - height/2) * self.display_height)
-                        x2 = int((x_center + width/2) * self.display_width)
-                        y2 = int((y_center + height/2) * self.display_height)
-                        
-                        self.current_bboxes.append((class_id, x1, y1, x2, y2))
+
+                        # Convert normalized (relative to original frame) to ORIGINAL pixel coords
+                        x_center_px = x_center * self.frame_width
+                        y_center_px = y_center * self.frame_height
+                        w_px = width * self.frame_width
+                        h_px = height * self.frame_height
+
+                        x1_orig = max(0.0, x_center_px - w_px / 2)
+                        y1_orig = max(0.0, y_center_px - h_px / 2)
+                        x2_orig = min(float(self.frame_width), x_center_px + w_px / 2)
+                        y2_orig = min(float(self.frame_height), y_center_px + h_px / 2)
+
+                        self.current_bboxes.append((class_id, int(x1_orig), int(y1_orig), int(x2_orig), int(y2_orig)))
     
     def redraw_bboxes(self):
         """Redraw all bounding boxes on the canvas"""
@@ -1031,30 +1314,45 @@ class VideoAnnotatorGUI:
         self.pan_y = max(self.pan_y, 0)
     
     def canvas_to_image_coords(self, canvas_x, canvas_y):
-        """Convert canvas coordinates to image coordinates accounting for zoom and pan"""
-        img_x = (canvas_x - self.pan_x) / self.zoom_level
-        img_y = (canvas_y - self.pan_y) / self.zoom_level
+        """Convert canvas coordinates to ORIGINAL image coordinates accounting for zoom, pan, and base scale."""
+        if not hasattr(self, 'base_scale_x') or not hasattr(self, 'base_scale_y'):
+            return canvas_x, canvas_y
+        # Remove pan and zoom, then unscale to original
+        disp_x = (canvas_x - self.pan_x) / self.zoom_level
+        disp_y = (canvas_y - self.pan_y) / self.zoom_level
+        img_x = disp_x / self.base_scale_x
+        img_y = disp_y / self.base_scale_y
         return img_x, img_y
     
     def image_to_canvas_coords(self, img_x, img_y):
-        """Convert image coordinates to canvas coordinates accounting for zoom and pan"""
-        canvas_x = img_x * self.zoom_level + self.pan_x
-        canvas_y = img_y * self.zoom_level + self.pan_y
+        """Convert ORIGINAL image coordinates to canvas coordinates accounting for base scale, zoom and pan."""
+        if not hasattr(self, 'base_scale_x') or not hasattr(self, 'base_scale_y'):
+            return img_x, img_y
+        disp_x = img_x * self.base_scale_x
+        disp_y = img_y * self.base_scale_y
+        canvas_x = disp_x * self.zoom_level + self.pan_x
+        canvas_y = disp_y * self.zoom_level + self.pan_y
         return canvas_x, canvas_y
     
     def update_zoomed_image(self):
-        """Update the displayed image with current zoom and pan"""
+        """Update the displayed image with current zoom and pan (with caching for performance)"""
         if not hasattr(self, 'base_display_img'):
             return
         
-        # Calculate zoomed image size
-        zoomed_width = int(self.display_width * self.zoom_level)
-        zoomed_height = int(self.display_height * self.zoom_level)
-        
-        # Resize image with zoom
-        zoomed_img = self.base_display_img.resize((zoomed_width, zoomed_height), Image.Resampling.LANCZOS)
-        
-        self.frame_photo = ImageTk.PhotoImage(zoomed_img)
+        # Check if we can reuse cached zoomed image (only pan changed, not zoom)
+        if (self.cached_zoomed_img is not None and 
+            self.cached_zoom_level == self.zoom_level):
+            # Just use cached zoomed image, avoid PIL resize
+            self.frame_photo = ImageTk.PhotoImage(self.cached_zoomed_img)
+        else:
+            # Zoom changed, recalculate and cache the resized image
+            zoomed_width = int(self.display_width * self.zoom_level)
+            zoomed_height = int(self.display_height * self.zoom_level)
+            
+            # Resize image with zoom and cache for subsequent pans
+            self.cached_zoomed_img = self.base_display_img.resize((zoomed_width, zoomed_height), Image.Resampling.LANCZOS)
+            self.cached_zoom_level = self.zoom_level
+            self.frame_photo = ImageTk.PhotoImage(self.cached_zoomed_img)
         
         self.frame_canvas.delete("all")
         self.frame_canvas.create_image(self.pan_x, self.pan_y, anchor=tk.NW, image=self.frame_photo)
@@ -1159,11 +1457,11 @@ class VideoAnnotatorGUI:
         if img_y1 > img_y2:
             img_y1, img_y2 = img_y2, img_y1
         
-        # Constrain to image boundaries
-        img_x1 = max(0, min(img_x1, self.display_width))
-        img_y1 = max(0, min(img_y1, self.display_height))
-        img_x2 = max(0, min(img_x2, self.display_width))
-        img_y2 = max(0, min(img_y2, self.display_height))
+        # Constrain to ORIGINAL image boundaries
+        img_x1 = max(0.0, min(img_x1, float(self.frame_width)))
+        img_y1 = max(0.0, min(img_y1, float(self.frame_height)))
+        img_x2 = max(0.0, min(img_x2, float(self.frame_width)))
+        img_y2 = max(0.0, min(img_y2, float(self.frame_height)))
         
         # Ignore very small boxes (in image coordinates)
         if abs(img_x2 - img_x1) < 5 or abs(img_y2 - img_y1) < 5:
@@ -1172,7 +1470,7 @@ class VideoAnnotatorGUI:
                 self.temp_rect = None
             return
         
-        # Add bounding box in image coordinates
+        # Add bounding box in ORIGINAL image coordinates
         class_id = CLASS_MAPPING[self.current_class.get()]
         self.current_bboxes.append((class_id, int(img_x1), int(img_y1), int(img_x2), int(img_y2)))
         
@@ -1209,7 +1507,7 @@ class VideoAnnotatorGUI:
         
         if self.current_frame_idx > 0:
             self.current_frame_idx -= 1
-            self.display_current_frame()
+            self.display_current_frame(preserve_view=True)
     
     def next_frame(self, event):
         """Go to next frame"""
@@ -1217,7 +1515,7 @@ class VideoAnnotatorGUI:
         
         if self.current_frame_idx < len(self.extracted_frames) - 1:
             self.current_frame_idx += 1
-            self.display_current_frame()
+            self.display_current_frame(preserve_view=True)
         else:
             self.update_status("📌 Last frame of this video. Press Enter to save and move to next video.", '#0066cc')
     
@@ -1261,7 +1559,30 @@ class VideoAnnotatorGUI:
     def reset_detection_zoom(self, event=None):
         """Reset detection image zoom to 1.0"""
         self.detection_zoom = 1.0
+        self.detection_pan_x = 0
+        self.detection_pan_y = 0
         self.display_detection_image()
+    
+    def on_detection_pan_start(self, event):
+        """Start panning detection image with middle mouse button"""
+        self.detection_panning = True
+        self.detection_pan_start_x = event.x
+        self.detection_pan_start_y = event.y
+    
+    def on_detection_pan_drag(self, event):
+        """Pan the detection image"""
+        if self.detection_panning:
+            dx = event.x - self.detection_pan_start_x
+            dy = event.y - self.detection_pan_start_y
+            self.detection_pan_x += dx
+            self.detection_pan_y += dy
+            self.detection_pan_start_x = event.x
+            self.detection_pan_start_y = event.y
+            self.display_detection_image()
+    
+    def on_detection_pan_end(self, event):
+        """End panning detection image"""
+        self.detection_panning = False
     
     def on_enter_key(self, event):
         """Handle Enter key - save current video and move to next"""
@@ -1290,25 +1611,16 @@ class VideoAnnotatorGUI:
         """Save all extracted frames of the current video to output directory"""
         if not self.video_files or not self.extracted_frames:
             return
-        
+
         basename = self.video_files[self.current_video_idx]
         output_path = self.output_dir.get()
         images_dir = os.path.join(output_path, "images")
-        
-        # Get the video path to extract frames
-        input_path = self.input_dir.get()
-        video_path = os.path.join(input_path, basename + ".mp4")
-        
-        if not os.path.exists(video_path):
-            return
-        
-        # Extract all frames and save them
-        all_frames = extract_frames_from_video(video_path, self.num_frames.get())
-        
-        for frame_number, frame in all_frames:
+
+        # Save exactly the frames currently extracted in memory
+        for frame_number, frame in self.extracted_frames:
             frame_name = f"{basename}_{frame_number}.jpg"
             img_path = os.path.join(images_dir, frame_name)
-            
+
             # Only save if doesn't exist (preserve already annotated frames)
             if not os.path.exists(img_path):
                 cv2.imwrite(img_path, frame)
@@ -1335,18 +1647,24 @@ class VideoAnnotatorGUI:
             label_path = os.path.join(labels_dir, f"{frame_name}.txt")
             with open(label_path, 'w') as f:
                 for class_id, x1, y1, x2, y2 in self.current_bboxes:
-                    # Convert to normalized YOLO format
-                    x_center = ((x1 + x2) / 2) / self.display_width
-                    y_center = ((y1 + y2) / 2) / self.display_height
-                    width = abs(x2 - x1) / self.display_width
-                    height = abs(y2 - y1) / self.display_height
-                    
+                    # Ensure coordinates are within original bounds
+                    x1o = max(0, min(self.frame_width, x1))
+                    y1o = max(0, min(self.frame_height, y1))
+                    x2o = max(0, min(self.frame_width, x2))
+                    y2o = max(0, min(self.frame_height, y2))
+
+                    # Convert to normalized YOLO format relative to original frame size
+                    x_center = ((x1o + x2o) / 2.0) / float(self.frame_width)
+                    y_center = ((y1o + y2o) / 2.0) / float(self.frame_height)
+                    width = abs(x2o - x1o) / float(self.frame_width)
+                    height = abs(y2o - y1o) / float(self.frame_height)
+
                     # Constrain normalized values to [0, 1]
                     x_center = max(0.0, min(1.0, x_center))
                     y_center = max(0.0, min(1.0, y_center))
                     width = max(0.0, min(1.0, width))
                     height = max(0.0, min(1.0, height))
-                    
+
                     f.write(f"{class_id} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}\n")
         else:
             # No annotations - delete label file if it exists
@@ -1355,28 +1673,14 @@ class VideoAnnotatorGUI:
                 os.remove(label_path)
     
     def save_and_exit(self):
-        """Save all and exit"""
+        """Fast save and exit without reprocessing all videos"""
+        # Save current frame and current video's pending frames (if any)
+        self.update_status("💾 Saving current work and exiting...", '#10b981')
         self.save_current_frame_annotations()
-        
-        # Save all remaining frames from all videos
-        for video_idx in range(len(self.video_files)):
-            basename = self.video_files[video_idx]
-            video_path = os.path.join(self.input_dir.get(), basename + ".mp4")
-            
-            frames = extract_frames_from_video(video_path, self.num_frames.get())
-            output_path = self.output_dir.get()
-            images_dir = os.path.join(output_path, "images")
-            
-            for frame_number, frame in frames:
-                frame_name = f"{basename}_{frame_number}"
-                img_path = os.path.join(images_dir, f"{frame_name}.jpg")
-                
-                # Only save if doesn't exist (to preserve user annotations)
-                if not os.path.exists(img_path):
-                    cv2.imwrite(img_path, frame)
-        
-        messagebox.showinfo("Success", "All annotations saved successfully!")
-        self.master.quit()
+        self.save_all_frames_of_current_video()
+        self.save_progress()
+        # Exit quickly (no blocking dialogs)
+        self.master.after(100, self.master.quit)
 
 ################################################################################
 # Main Entry Point

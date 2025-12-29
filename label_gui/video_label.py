@@ -14,7 +14,7 @@ from tkinter import font as tkfont
 # Constants
 ################################################################################
 
-CLASSES = ["Bat", "Bird", "DragonFly", "Drone", "Plane", "Other"]
+CLASSES = ["Bat", "Bird", "Insect", "Drone", "Plane", "Other"]
 CLASS_MAPPING = {name: idx for idx, name in enumerate(CLASSES)}
 
 ################################################################################
@@ -112,7 +112,13 @@ class VideoAnnotatorGUI:
         self.input_dir = tk.StringVar()
         self.output_dir = tk.StringVar()
         self.num_frames = tk.IntVar(value=10)
-        self.frame_increment_mode = tk.StringVar(value="stride")  # "stride" or "distributed"
+        
+        # Frame increment options
+        self.frame_increment_count = tk.IntVar(value=5)
+        self.frame_increment_mode = tk.StringVar(value="sequence")  # "sequence" or "distributed"
+        self.frame_direction = tk.StringVar(value="next")  # "next" or "previous"
+        self.frame_skip = tk.IntVar(value=1)  # How many frames to skip between selections
+        self.distributed_scope = tk.StringVar(value="remaining")  # "remaining" or "all"
         
         self.video_files = []  # List of video basenames
         self.current_video_idx = 0
@@ -213,8 +219,46 @@ class VideoAnnotatorGUI:
         
     def setup_ui(self):
         """Setup the GUI layout"""
+        # Scrollable root so the UI remains usable on smaller screens
+        scroll_container = tk.Frame(self.master, bg=self.colors['bg_secondary'])
+        scroll_container.pack(fill=tk.BOTH, expand=True)
+
+        scrollbar = tk.Scrollbar(scroll_container, orient=tk.VERTICAL)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.scroll_canvas = tk.Canvas(
+            scroll_container,
+            bg=self.colors['bg_secondary'],
+            highlightthickness=0,
+            yscrollcommand=scrollbar.set
+        )
+        self.scroll_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=self.scroll_canvas.yview)
+
+        self.scrollable_frame = tk.Frame(self.scroll_canvas, bg=self.colors['bg_secondary'])
+        self.scrollable_window = self.scroll_canvas.create_window(
+            (0, 0),
+            window=self.scrollable_frame,
+            anchor="nw"
+        )
+
+        # Keep scroll region and width in sync with contents
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.scroll_canvas.configure(scrollregion=self.scroll_canvas.bbox("all"))
+        )
+        self.scroll_canvas.bind(
+            "<Configure>",
+            lambda e: self.scroll_canvas.itemconfig(self.scrollable_window, width=e.width)
+        )
+
+        # Mouse wheel support for vertical scrolling (skip when over zoom canvases)
+        self.scroll_canvas.bind_all("<MouseWheel>", self.on_vertical_scroll, add="+")
+        self.scroll_canvas.bind_all("<Button-4>", self.on_vertical_scroll, add="+")
+        self.scroll_canvas.bind_all("<Button-5>", self.on_vertical_scroll, add="+")
+
         # Header frame
-        header_frame = tk.Frame(self.master, bg=self.colors['primary'], height=80)
+        header_frame = tk.Frame(self.scrollable_frame, bg=self.colors['primary'], height=80)
         header_frame.pack(fill=tk.X, padx=0, pady=0)
         header_frame.pack_propagate(False)
         
@@ -237,7 +281,7 @@ class VideoAnnotatorGUI:
         header_subtitle.pack()
         
         # Top frame for directory selection
-        top_frame = tk.Frame(self.master, bg=self.colors['bg_secondary'])
+        top_frame = tk.Frame(self.scrollable_frame, bg=self.colors['bg_secondary'])
         top_frame.pack(fill=tk.X, padx=15, pady=15)
         
         # Input directory section
@@ -333,7 +377,7 @@ class VideoAnnotatorGUI:
         top_frame.columnconfigure(1, weight=1)
         
         # Main content frame
-        content_frame = tk.Frame(self.master, bg=self.colors['bg_secondary'])
+        content_frame = tk.Frame(self.scrollable_frame, bg=self.colors['bg_secondary'])
         content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Left panel - Detection image and video player
@@ -431,6 +475,39 @@ class VideoAnnotatorGUI:
         video_controls.columnconfigure(0, weight=1)
         video_controls.columnconfigure(1, weight=1)
         video_controls.columnconfigure(2, weight=1)
+        
+        # Video progress bar (seek bar)
+        progress_bar_frame = tk.Frame(video_card, bg=self.colors['bg_primary'])
+        progress_bar_frame.pack(pady=(5, 10), padx=10, fill=tk.X)
+        
+        self.video_progress = tk.Scale(progress_bar_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+                                       command=self.on_video_seek,
+                                       bg=self.colors['bg_primary'],
+                                       fg=self.colors['text_primary'],
+                                       highlightthickness=0,
+                                       troughcolor=self.colors['bg_tertiary'],
+                                       activebackground=self.colors['primary'])
+        self.video_progress.pack(fill=tk.X, pady=5)
+        
+        self.video_time_label = tk.Label(progress_bar_frame, text="00:00 / 00:00",
+                                         font=('Segoe UI', 8),
+                                         bg=self.colors['bg_primary'],
+                                         fg=self.colors['text_secondary'])
+        self.video_time_label.pack()
+        
+        # File explorer button
+        explorer_btn = tk.Button(video_card, text="📁 Show in Explorer",
+                                command=self.show_in_explorer,
+                                font=('Segoe UI', 9, 'bold'),
+                                bg=self.colors['bg_tertiary'],
+                                fg=self.colors['text_primary'],
+                                relief=tk.FLAT,
+                                bd=0,
+                                padx=10,
+                                pady=5,
+                                cursor='hand2',
+                                activebackground=self.colors['border'])
+        explorer_btn.pack(pady=(0, 10), padx=10)
         
         self.video_label = tk.Label(video_card, text="Video: N/A", 
                                    font=('Segoe UI', 8),
@@ -647,7 +724,7 @@ class VideoAnnotatorGUI:
         row3_frame = tk.Frame(controls_frame, bg=self.colors['bg_secondary'])
         row3_frame.pack(fill=tk.X, pady=5)
         
-        tk.Button(row3_frame, text="➕ Increase Frames +5", 
+        tk.Button(row3_frame, text="➕ Add Frames", 
                  command=self.increase_frames_for_video,
                  font=('Segoe UI', 9, 'bold'),
                  bg='#8b5cf6',
@@ -659,16 +736,16 @@ class VideoAnnotatorGUI:
                  cursor='hand2',
                  activebackground='#7c3aed').pack(side=tk.LEFT, padx=2)
         
-        # Frame increment mode selector
-        tk.Label(row3_frame, text="Mode:", 
-                font=('Segoe UI', 9, 'bold'),
+        # Frame count spinner
+        tk.Label(row3_frame, text="Count:", 
+                font=('Segoe UI', 8),
                 bg=self.colors['bg_secondary'],
-                fg=self.colors['text_primary']).pack(side=tk.LEFT, padx=5)
+                fg=self.colors['text_primary']).pack(side=tk.LEFT, padx=(5,0))
         
-        mode_dropdown = ttk.Combobox(row3_frame, textvariable=self.frame_increment_mode,
-                                      values=["stride", "distributed"], state="readonly", width=12,
-                                      font=('Segoe UI', 9))
-        mode_dropdown.pack(side=tk.LEFT, padx=2)
+        tk.Spinbox(row3_frame, from_=1, to=50, textvariable=self.frame_increment_count,
+                  font=('Segoe UI', 8), width=4,
+                  bg=self.colors['bg_primary'], fg=self.colors['text_primary'],
+                  relief=tk.FLAT, bd=1).pack(side=tk.LEFT, padx=2)
         
         # Frame count display label
         self.frame_count_label = tk.Label(row3_frame, text="Frames: 10", 
@@ -676,12 +753,74 @@ class VideoAnnotatorGUI:
                                          bg=self.colors['bg_secondary'],
                                          fg=self.colors['text_secondary'],
                                          relief=tk.FLAT)
-        self.frame_count_label.pack(side=tk.LEFT, padx=10)
+        self.frame_count_label.pack(side=tk.RIGHT, padx=10)
+        
+        # Row 4: Frame increment options
+        row4_frame = tk.Frame(controls_frame, bg=self.colors['bg_secondary'])
+        row4_frame.pack(fill=tk.X, pady=2)
+        
+        # Direction selector
+        tk.Label(row4_frame, text="Dir:", 
+                font=('Segoe UI', 8),
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['text_primary']).pack(side=tk.LEFT, padx=(2,0))
+        
+        direction_dropdown = ttk.Combobox(row4_frame, textvariable=self.frame_direction,
+                                         values=["next", "previous"], width=8,
+                                         font=('Segoe UI', 8))
+        direction_dropdown.pack(side=tk.LEFT, padx=2)
+        
+        # Mode selector
+        tk.Label(row4_frame, text="Mode:", 
+                font=('Segoe UI', 8),
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['text_primary']).pack(side=tk.LEFT, padx=(5,0))
+        
+        mode_dropdown = ttk.Combobox(row4_frame, textvariable=self.frame_increment_mode,
+                                     values=["sequence", "distributed"], width=10,
+                                     font=('Segoe UI', 8))
+        mode_dropdown.pack(side=tk.LEFT, padx=2)
+        
+        # Skip/Scope selector
+        tk.Label(row4_frame, text="Skip:", 
+                font=('Segoe UI', 8),
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['text_primary']).pack(side=tk.LEFT, padx=(5,0))
+        
+        self.skip_spinbox = tk.Spinbox(row4_frame, from_=0, to=30, textvariable=self.frame_skip,
+                                        font=('Segoe UI', 8), width=3,
+                                        bg=self.colors['bg_primary'], fg=self.colors['text_primary'],
+                                        relief=tk.FLAT, bd=1)
+        self.skip_spinbox.pack(side=tk.LEFT, padx=2)
+        
+        tk.Label(row4_frame, text="Scope:", 
+                font=('Segoe UI', 8),
+                bg=self.colors['bg_secondary'],
+                fg=self.colors['text_primary']).pack(side=tk.LEFT, padx=(5,0))
+        
+        scope_dropdown = ttk.Combobox(row4_frame, textvariable=self.distributed_scope,
+                                     values=["remaining", "all"], width=9,
+                                     font=('Segoe UI', 8))
+        scope_dropdown.pack(side=tk.LEFT, padx=2)
         
         # Video playback
         self.video_playing = False
         self.video_cap = None
-        
+        self.seeking = False  # Flag to prevent seek feedback loop
+
+    def on_vertical_scroll(self, event):
+        """Scroll the main canvas without fighting zoom handlers"""
+        if event.widget in (getattr(self, "frame_canvas", None), getattr(self, "detection_canvas", None)):
+            return
+        if getattr(self, "scroll_canvas", None) is None:
+            return
+        if getattr(event, "num", None) == 4:
+            self.scroll_canvas.yview_scroll(-1, "units")
+        elif getattr(event, "num", None) == 5:
+            self.scroll_canvas.yview_scroll(1, "units")
+        else:
+            self.scroll_canvas.yview_scroll(-1 * int(event.delta / 120), "units")
+
     def browse_input(self):
         """Browse for input directory"""
         directory = filedialog.askdirectory()
@@ -937,7 +1076,7 @@ class VideoAnnotatorGUI:
         self.update_progress_bar()
     
     def increase_frames_for_video(self):
-        """Add 5 frames using selected mode: stride (spaced) or distributed (evenly spread)"""
+        """Add frames using comprehensive options: count, direction, mode (stride/distributed), scope"""
         if not self.video_files or not self.extracted_frames:
             self.update_status("⚠️ No videos loaded", '#f59e0b')
             return
@@ -953,40 +1092,79 @@ class VideoAnnotatorGUI:
         cap.release()
         
         existing_indices = {idx for idx, _ in self.extracted_frames}
+        
+        # Get user options
+        count = self.frame_increment_count.get()
         mode = self.frame_increment_mode.get()
+        direction = self.frame_direction.get()
+        skip = self.frame_skip.get()  # How many frames to skip between selections
+        scope = self.distributed_scope.get()
         
         needed = []
         
-        if mode == "stride":
-            # Add 5 frames with spacing (stride=5) to reduce similarity
-            stride = 5
-            frame_num = current_frame_number + stride
+        if mode == "sequence":
+            # Sequence mode: take frames with skipping pattern
+            # skip=0: consecutive (1,2,3,4,5...)
+            # skip=1: take 1, skip 1, take 1 (e.g., skip 1, take 2, skip 3, take 4...)
+            # skip=2: take 1, skip 2, take 1 (e.g., skip 1,2, take 3, skip 4,5, take 6...)
+            interval = skip + 1  # Interval between selected frames
             
-            while len(needed) < 5 and frame_num < total_frames:
-                if frame_num not in existing_indices:
-                    needed.append(frame_num)
-                frame_num += stride
-            
-            mode_desc = f"stride={stride}"
-        else:  # distributed
-            # Add 5 frames evenly distributed from current_frame to end of video
-            remaining = total_frames - current_frame_number - 1
-            if remaining <= 5:
-                # Not enough frames, just take all remaining
-                needed = [i for i in range(current_frame_number + 1, total_frames) 
-                         if i not in existing_indices]
-            else:
-                # Distribute 5 frames evenly
-                step = remaining // 5
-                for i in range(1, 6):
-                    frame_num = current_frame_number + (i * step)
-                    if frame_num < total_frames and frame_num not in existing_indices:
+            if direction == "next":
+                frame_num = current_frame_number + interval
+                while len(needed) < count and frame_num < total_frames:
+                    if frame_num not in existing_indices:
                         needed.append(frame_num)
-            
-            mode_desc = "distributed"
+                    frame_num += interval
+                mode_desc = f"next, skip={skip}"
+            else:  # previous
+                frame_num = current_frame_number - interval
+                while len(needed) < count and frame_num >= 0:
+                    if frame_num not in existing_indices:
+                        needed.append(frame_num)
+                    frame_num -= interval
+                mode_desc = f"prev, skip={skip}"
+        else:  # distributed
+            # Distributed mode: spread frames evenly
+            if scope == "all":
+                # Distribute across entire video
+                if total_frames <= count:
+                    needed = [i for i in range(total_frames) if i not in existing_indices]
+                else:
+                    step = total_frames / (count + 1)
+                    for i in range(1, count + 1):
+                        frame_num = int(i * step)
+                        if 0 <= frame_num < total_frames and frame_num not in existing_indices:
+                            needed.append(frame_num)
+                mode_desc = "distributed, all video"
+            else:  # remaining
+                # Distribute from current frame to end (or start if previous)
+                if direction == "next":
+                    remaining = total_frames - current_frame_number - 1
+                    if remaining <= count:
+                        needed = [i for i in range(current_frame_number + 1, total_frames) 
+                                 if i not in existing_indices]
+                    else:
+                        step = remaining / count
+                        for i in range(1, count + 1):
+                            frame_num = current_frame_number + int(i * step)
+                            if frame_num < total_frames and frame_num not in existing_indices:
+                                needed.append(frame_num)
+                    mode_desc = "distributed, remaining"
+                else:  # previous
+                    remaining = current_frame_number
+                    if remaining <= count:
+                        needed = [i for i in range(0, current_frame_number) 
+                                 if i not in existing_indices]
+                    else:
+                        step = remaining / count
+                        for i in range(1, count + 1):
+                            frame_num = current_frame_number - int(i * step)
+                            if frame_num >= 0 and frame_num not in existing_indices:
+                                needed.append(frame_num)
+                    mode_desc = "distributed, before current"
         
         if not needed:
-            self.update_status("ℹ️ No new frames available.", '#f59e0b')
+            self.update_status("ℹ️ No new frames available with current settings.", '#f59e0b')
             return
         
         needed = sorted(set(needed))
@@ -1076,6 +1254,19 @@ class VideoAnnotatorGUI:
         self.video_cap = cv2.VideoCapture(self.video_path)
         self.video_playing = False
         
+        # Initialize video progress bar
+        if self.video_cap:
+            total_frames = int(self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = self.video_cap.get(cv2.CAP_PROP_FPS)
+            if total_frames > 0:
+                self.video_progress.config(to=total_frames - 1)
+                self.video_progress.set(0)
+            if fps > 0:
+                total_sec = total_frames / fps
+                total_min = int(total_sec // 60)
+                total_sec_rem = int(total_sec % 60)
+                self.video_time_label.config(text=f"00:00 / {total_min:02d}:{total_sec_rem:02d}")
+        
         # Display first frame
         ret, frame = self.video_cap.read()
         if ret:
@@ -1090,17 +1281,32 @@ class VideoAnnotatorGUI:
         self.video_canvas.delete("all")
         self.video_canvas.create_image(0, 0, anchor=tk.NW, image=self.video_photo)
         
-        # Display timestamp during playback
-        if self.video_playing and self.video_cap:
-            current_frame_idx = int(self.video_cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1  # Subtract 1 because frame was just read
+        # Update progress bar and time label
+        if self.video_cap and not self.seeking:
+            current_frame_idx = int(self.video_cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
             fps = self.video_cap.get(cv2.CAP_PROP_FPS)
+            
+            # Update progress bar
+            self.video_progress.set(current_frame_idx)
+            
+            # Update time label
             if fps > 0:
-                timestamp_sec = current_frame_idx / fps
-                minutes = int(timestamp_sec // 60)
-                seconds = timestamp_sec % 60
-                timestamp = f"{minutes:02d}:{seconds:05.2f}"
-                self.video_canvas.create_text(340, 240, text=timestamp, fill="yellow", anchor=tk.SE,
-                                             font=('Segoe UI', 10, 'bold'))
+                current_sec = current_frame_idx / fps
+                current_min = int(current_sec // 60)
+                current_sec_rem = int(current_sec % 60)
+                
+                total_frames = int(self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                total_sec = total_frames / fps
+                total_min = int(total_sec // 60)
+                total_sec_rem = int(total_sec % 60)
+                
+                self.video_time_label.config(text=f"{current_min:02d}:{current_sec_rem:02d} / {total_min:02d}:{total_sec_rem:02d}")
+                
+                # Display timestamp on video during playback
+                if self.video_playing:
+                    timestamp = f"{current_min:02d}:{current_sec_rem:02d}"
+                    self.video_canvas.create_text(340, 240, text=timestamp, fill="yellow", anchor=tk.SE,
+                                                 font=('Segoe UI', 10, 'bold'))
 
     
     def play_video(self):
@@ -1437,6 +1643,13 @@ class VideoAnnotatorGUI:
         
         self.drawing = False
         
+        # Check if frame is loaded
+        if not hasattr(self, 'frame_width') or not hasattr(self, 'frame_height'):
+            if self.temp_rect:
+                self.frame_canvas.delete(self.temp_rect)
+                self.temp_rect = None
+            return
+        
         # Convert canvas coordinates to image coordinates
         img_x1, img_y1 = self.canvas_to_image_coords(self.start_x, self.start_y)
         img_x2, img_y2 = self.canvas_to_image_coords(event.x, event.y)
@@ -1577,6 +1790,33 @@ class VideoAnnotatorGUI:
     def on_enter_key(self, event):
         """Handle Enter key - save current video and move to next"""
         self.save_video_and_next()
+    
+    def on_video_seek(self, value):
+        """Handle video seek bar changes"""
+        if not self.video_cap or self.video_playing:
+            return
+        
+        self.seeking = True
+        frame_num = int(float(value))
+        self.video_cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+        ret, frame = self.video_cap.read()
+        if ret:
+            self.display_video_frame(frame)
+        self.seeking = False
+    
+    def show_in_explorer(self):
+        """Open file explorer and select the current video file"""
+        if not self.video_path or not os.path.exists(self.video_path):
+            self.update_status("⚠️ Video file not found", '#f59e0b')
+            return
+        
+        try:
+            # Windows: use explorer with /select flag
+            import subprocess
+            subprocess.Popen(f'explorer /select,"{self.video_path}"')
+            self.update_status("📁 Opened in File Explorer", '#10b981')
+        except Exception as e:
+            self.update_status(f"❌ Error opening explorer: {str(e)}", '#ef4444')
     
     def save_video_and_next(self):
         """Save all annotations for current video and move to next video"""

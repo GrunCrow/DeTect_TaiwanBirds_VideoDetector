@@ -1,1 +1,4 @@
 deep_learning/PRIVATE.py
+*.pt
+*/wandb/*
+*/runs/*

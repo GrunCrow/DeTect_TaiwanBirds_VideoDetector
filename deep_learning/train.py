@@ -28,10 +28,42 @@ def main():
     # Load a model
     model = YOLO("yolo11n.pt")  # load a pretrained model (recommended for training)
 
-    # Train the model
-    results = model.train()
+    # set cfg.yaml parameters
+    # model.cfg.data = 'datasets/DeTect.yaml'  # path to data.yaml
 
-    results = model.train()
+    # Train the model
+    results = model.train(
+        data = 'cfg/datasets/DeTect.yaml',
+        project = 'DeTect-BMMS',
+        name = f'runs/yolov11n-test-cfg',
+        epochs = 500,
+        patience = 25,
+        single_cls = True,
+        # classes = [1],  # only these classes will be used for training - 1 = Bird
+        # batch = 16,
+        # imgsz = 640,
+        # optimizer = 'auto',
+        # deterministic = True,
+        # single_cls = False,
+        # cos_lr = False,
+        # close_mosaic = 10,
+        # dropout = 0.0,
+
+        # Augmentation parameters - All false
+        degrees = 0.0,
+        translate = 0, # 0.1,
+        scale = 0, #0.5,
+        shear = 0.0,
+        perspective = 0.0,
+        flipud = 0.0,
+        fliplr = 0, #0.5,
+        mosaic = 0, #1.0,
+        cutmix = 0.0,
+        copy_paste = 0.0,
+        # auto_augment = "randaugment",
+        erasing = 0 # 0.4 # ---- change
+        )
+
     print(results)
 
 

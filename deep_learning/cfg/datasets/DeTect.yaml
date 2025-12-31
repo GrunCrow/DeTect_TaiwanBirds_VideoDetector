@@ -6,16 +6,18 @@
 #     └── DeTect
 
 # Train/val/test sets as 1) dir: path/to/imgs, 2) file: path/to/imgs.txt, or 3) list: [path/to/imgs1, path/to/imgs2, ..]
-path: coco # dataset root dir
+path: ../dataset/csvs/splits # dataset root dir
 train: train.txt # train images (relative to 'path')
 val: val.txt # val images (relative to 'path')
 test: test.txt # 
 
 # Classes
 names:
-  0: bat
+  #0: bat
+  0: target
   1: bird
-  2: drone
-  3: insect
-  4: drone
+  2: insect
+  3: drone
+  4: plane
   5: other
+  6: unknown

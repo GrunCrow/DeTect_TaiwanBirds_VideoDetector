@@ -14,7 +14,7 @@ from tkinter import font as tkfont
 # Constants
 ################################################################################
 
-CLASSES = ["Bat", "Bird", "Insect", "Drone", "Plane", "Other"]
+CLASSES = ["Bat", "Bird", "Insect", "Drone", "Plane", "Other", "Unknown"]
 CLASS_MAPPING = {name: idx for idx, name in enumerate(CLASSES)}
 
 ################################################################################
@@ -1479,7 +1479,7 @@ class VideoAnnotatorGUI:
     
     def redraw_bboxes(self):
         """Redraw all bounding boxes on the canvas"""
-        colors = ["red", "blue", "green", "yellow", "purple", "orange"]
+        colors = ["red", "blue", "green", "yellow", "purple", "orange", "black"]
         
         for class_id, x1, y1, x2, y2 in self.current_bboxes:
             # Convert image coords to canvas coords with zoom

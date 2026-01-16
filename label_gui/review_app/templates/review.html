@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review & Relabel Videos</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="navbar">
+        <div class="navbar-container">
+            <h1 class="navbar-title">🎬 Label Review & Relabel</h1>
+            <div class="navbar-center">
+                <div class="annotator-selector">
+                    <label for="annotator-select">👤 Annotator:</label>
+                    <select id="annotator-select" class="form-select">
+                        <option value="">-- Select Annotator --</option>
+                        <option value="Alba">Alba</option>
+                        <option value="Mike">Mike</option>
+                        <option value="Javier">Javier</option>
+                    </select>
+                </div>
+            </div>
+            <div class="navbar-links">
+                <a href="/" class="nav-link">📊 Dashboard</a>
+                <a href="/review" class="nav-link active">🔍 Review & Relabel</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="review-container">
+        <!-- Left Panel: Video & Frame Selection -->
+        <div class="review-left-panel">
+            <div class="panel-section">
+                <h3>📹 Videos</h3>
+                <div id="video-list" class="video-list">
+                    <p class="loading-text">Loading videos...</p>
+                </div>
+            </div>
+
+            <!-- Statistics Panel -->
+            <div class="panel-section">
+                <h3>📊 Session Stats</h3>
+                <div class="stats-panel">
+                    <div class="stat-row">
+                        <span>Changes made:</span>
+                        <span id="changes-count" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>Video changes:</span>
+                        <span id="video-changes-count" class="stat-value">0</span>
+                    </div>
+                </div>
+                <button id="clear-btn" class="btn btn-secondary btn-block" style="margin-top: 8px;">
+                    🗑️ Clear Changes
+                </button>
+            </div>
+        </div>
+
+        <!-- Right Panel: Frame Review & Annotation -->
+        <div class="review-right-panel">
+            <!-- Frame Display -->
+            <div class="frame-display-section">
+                <div class="frame-header">
+                    <div id="frame-info">Select a video to start reviewing</div>
+                    <div class="frame-controls">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="show-bboxes-checkbox" checked>
+                            Show Bounding Boxes
+                        </label>
+                    </div>
+                </div>
+
+                <div class="frame-viewer">
+                    <div class="frame-canvas-container">
+                        <img id="frame-image" src="" alt="Frame" class="frame-image" style="display: none;">
+                        <canvas id="frame-canvas" class="frame-canvas"></canvas>
+                        <div id="no-frame-placeholder" class="no-frame-placeholder">
+                            👈 Select a video and frame to begin
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Frame Navigation -->
+                <div class="frame-nav">
+                    <button id="prev-frame-btn" class="btn btn-small">◀ Previous</button>
+                    <div id="frame-counter">-</div>
+                    <button id="next-frame-btn" class="btn btn-small">Next ▶</button>
+                </div>
+            </div>
+
+            <!-- Bounding Box Panel -->
+            <div class="bbox-panel">
+                <h3>🎯 Bounding Boxes</h3>
+                <div id="bboxes-list" class="bboxes-list">
+                    <p class="placeholder-text">No targets in this frame</p>
+                </div>
+            </div>
+
+            <!-- Class Change Panel -->
+            <div class="class-change-panel" id="class-change-panel" style="display: none;">
+                <h3>✏️ Change Class</h3>
+                <div class="change-form">
+                    <div class="form-group">
+                        <label>Current Class:</label>
+                        <div id="current-class" class="current-class-display">-</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="new-class-select">New Class:</label>
+                        <select id="new-class-select" class="form-select">
+                            <option value="">Select a class...</option>
+                        </select>
+                    </div>
+                    <div class="form-group checkbox">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="apply-to-all-frames-checkbox">
+                            Apply to all frames in video
+                        </label>
+                    </div>
+                    <button id="confirm-change-btn" class="btn btn-success btn-block">
+                        ✅ Confirm Change
+                    </button>
+                    <button id="cancel-change-btn" class="btn btn-secondary btn-block">
+                        ❌ Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Review History Modal -->
+    <div id="review-history-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📋 Review History</h3>
+                <button class="modal-close" id="close-history-modal">&times;</button>
+            </div>
+            <div id="history-content" class="modal-body">
+                <!-- History will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/review.js') }}"></script>
+</body>
+</html>

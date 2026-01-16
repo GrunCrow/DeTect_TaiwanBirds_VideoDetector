@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Label Review Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="navbar">
+        <div class="navbar-container">
+            <h1 class="navbar-title">🎬 Label Review Dashboard</h1>
+            <div class="navbar-links">
+                <a href="/" class="nav-link active">📊 Dashboard</a>
+                <a href="/review" class="nav-link">🔍 Review & Relabel</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Header Section -->
+        <div class="header">
+            <h2>Dataset Overview</h2>
+            <div class="header-stats">
+                <div class="stat-card">
+                    <div class="stat-label">Total Images</div>
+                    <div class="stat-value" id="stat-total-images">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Annotated</div>
+                    <div class="stat-value" id="stat-annotated">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Coverage</div>
+                    <div class="stat-value" id="stat-coverage">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Targets</div>
+                    <div class="stat-value" id="stat-targets">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Videos</div>
+                    <div class="stat-value" id="stat-videos">-</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg Targets/Image</div>
+                    <div class="stat-value" id="stat-avg-targets">-</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="charts-grid">
+            <!-- Row 1: Class Distribution and Videos -->
+            <div class="chart-container">
+                <h3>Distribution by Class</h3>
+                <div id="chart-class-distribution"></div>
+            </div>
+
+            <div class="chart-container">
+                <h3>Videos per Class</h3>
+                <div id="chart-videos-per-class"></div>
+            </div>
+
+            <!-- Row 2: Frames and Pie Chart -->
+            <div class="chart-container full-width">
+                <h3>Annotated vs Background Frames</h3>
+                <div id="chart-annotations-pie"></div>
+            </div>
+
+            <!-- Row 3: Frames per Video -->
+            <div class="chart-container full-width">
+                <h3>Frames per Video</h3>
+                <div id="chart-frames-per-video"></div>
+            </div>
+
+            <!-- Row 4: Class Presence Heatmap -->
+            <div class="chart-container full-width">
+                <h3>Class Presence per Video (Heatmap)</h3>
+                <div id="chart-class-heatmap"></div>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div id="loading-overlay" class="loading-overlay">
+            <div class="spinner"></div>
+            <p>Loading dataset...</p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

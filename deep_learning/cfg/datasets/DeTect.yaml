@@ -7,14 +7,16 @@
 
 # Train/val/test sets as 1) dir: path/to/imgs, 2) file: path/to/imgs.txt, or 3) list: [path/to/imgs1, path/to/imgs2, ..]
 path: ../dataset/csvs/splits # dataset root dir
-train: train.txt # train images (relative to 'path')
-val: val.txt # val images (relative to 'path')
+# train: train.txt # train images (relative to 'path')
+# val: val.txt # val images (relative to 'path')
 test: test.txt # 
+train: train_bg_undersampled.txt # train images (relative to 'path')
+val: val_bg_undersampled.txt # val images (relative to 'path')
+# val_test: val_test.txt # val_test images
 
 # Classes
 names:
-  #0: bat
-  0: target
+  0: bat
   1: bird
   2: insect
   3: drone

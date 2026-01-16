@@ -84,7 +84,11 @@ class VideoAnnotatorGUI:
     def __init__(self, master):
         self.master = master
         self.master.title("Video Annotation Tool for YOLO Training")
-        self.master.geometry("2200x1150")
+
+        # Responsive window sizing
+        self._resize_after_id = None
+        self._last_master_size = (None, None)
+        self.configure_initial_window_geometry()
         
         # Modern color scheme
         self.colors = {
@@ -160,6 +164,107 @@ class VideoAnnotatorGUI:
         self.cached_zoom_level = None
         
         self.setup_ui()
+
+        # Debounced resize handling (root window)
+        self.master.bind("<Configure>", self.on_master_configure, add="+")
+
+    def configure_initial_window_geometry(self):
+        """Set initial window size based on the active screen.
+
+        - On larger Windows screens, start maximized.
+        - On smaller screens, start near-fullscreen and allow scrolling.
+        """
+        try:
+            screen_w = int(self.master.winfo_screenwidth())
+            screen_h = int(self.master.winfo_screenheight())
+        except Exception:
+            # Fall back to previous fixed size
+            self.master.geometry("2200x1150")
+            return
+
+        # Reasonable minimum so the UI remains usable
+        self.master.minsize(1100, 720)
+
+        # If screen is big enough, maximize (best UX for annotation)
+        if os.name == "nt" and screen_w >= 1600 and screen_h >= 900:
+            try:
+                self.master.state("zoomed")
+                return
+            except Exception:
+                pass
+
+        # Otherwise, use a near-fullscreen geometry
+        target_w = max(1100, int(screen_w * 0.98))
+        target_h = max(720, int(screen_h * 0.92))
+        x = max(0, (screen_w - target_w) // 2)
+        y = max(0, (screen_h - target_h) // 2)
+        self.master.geometry(f"{target_w}x{target_h}+{x}+{y}")
+
+    def on_master_configure(self, event):
+        """Debounced handler for root window resize."""
+        if event.widget is not self.master:
+            return
+
+        w, h = int(event.width), int(event.height)
+        if (w, h) == self._last_master_size:
+            return
+        self._last_master_size = (w, h)
+
+        if self._resize_after_id is not None:
+            try:
+                self.master.after_cancel(self._resize_after_id)
+            except Exception:
+                pass
+
+        self._resize_after_id = self.master.after(150, self.apply_responsive_layout)
+
+    def apply_responsive_layout(self):
+        """Apply responsive sizing to preview canvases and refit images."""
+        self._resize_after_id = None
+
+        # Update left panel width and preview canvas sizes
+        if hasattr(self, "left_panel"):
+            try:
+                total_w = max(int(self.master.winfo_width()), 1)
+                # Keep left panel a sensible fraction of width
+                left_w = int(total_w * 0.23)
+                left_w = max(360, min(left_w, 700))
+                self.left_panel.configure(width=left_w)
+
+                # Account for padding inside cards
+                canvas_w = max(240, left_w - 30)
+                canvas_h = int(canvas_w / 1.4)  # ~350x250 aspect
+                canvas_h = max(160, min(canvas_h, 420))
+
+                if hasattr(self, "detection_canvas"):
+                    self.detection_canvas.configure(width=canvas_w, height=canvas_h)
+                if hasattr(self, "video_canvas"):
+                    self.video_canvas.configure(width=canvas_w, height=canvas_h)
+                if hasattr(self, "video_label"):
+                    self.video_label.configure(wraplength=canvas_w)
+            except Exception:
+                # Layout should never crash the UI
+                pass
+
+        # Refit previews to updated canvas sizes
+        if getattr(self, "detection_img_path", None):
+            try:
+                self.display_detection_image()
+            except Exception:
+                pass
+
+        if getattr(self, "video_cap", None) is not None and getattr(self, "last_video_frame", None) is not None:
+            try:
+                self.display_video_frame(self.last_video_frame)
+            except Exception:
+                pass
+
+        # Refit the annotation image without discarding unsaved bboxes
+        if hasattr(self, "current_frame_original") and hasattr(self, "frame_canvas"):
+            try:
+                self.refit_current_frame_to_canvas(preserve_view=True)
+            except Exception:
+                pass
     
     def setup_styles(self):
         """Configure custom ttk styles"""
@@ -381,12 +486,12 @@ class VideoAnnotatorGUI:
         content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Left panel - Detection image and video player
-        left_panel = tk.Frame(content_frame, bg=self.colors['bg_secondary'], width=380)
-        left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=5)
-        left_panel.pack_propagate(False)
+        self.left_panel = tk.Frame(content_frame, bg=self.colors['bg_secondary'], width=380)
+        self.left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=5)
+        self.left_panel.pack_propagate(False)
         
         # Detection card
-        detection_card = tk.Frame(left_panel, bg=self.colors['bg_primary'], relief=tk.FLAT)
+        detection_card = tk.Frame(self.left_panel, bg=self.colors['bg_primary'], relief=tk.FLAT)
         detection_card.pack(fill=tk.X, pady=5)
         
         detection_title = tk.Label(detection_card, text="📸 Detection Preview", 
@@ -400,7 +505,7 @@ class VideoAnnotatorGUI:
                                          relief=tk.FLAT,
                                          bd=0,
                                          highlightthickness=0)
-        self.detection_canvas.pack(pady=5, padx=10)
+        self.detection_canvas.pack(pady=5, padx=10, fill=tk.BOTH, expand=True)
         
         # Bind mouse wheel for detection image zoom
         self.detection_canvas.bind("<MouseWheel>", self.on_detection_zoom)
@@ -414,7 +519,7 @@ class VideoAnnotatorGUI:
         self.detection_canvas.bind("<ButtonRelease-2>", self.on_detection_pan_end)
         
         # Video card
-        video_card = tk.Frame(left_panel, bg=self.colors['bg_primary'], relief=tk.FLAT)
+        video_card = tk.Frame(self.left_panel, bg=self.colors['bg_primary'], relief=tk.FLAT)
         video_card.pack(fill=tk.X, pady=5)
         
         video_title = tk.Label(video_card, text="🎬 Video Player", 
@@ -428,7 +533,7 @@ class VideoAnnotatorGUI:
                                      relief=tk.FLAT,
                                      bd=0,
                                      highlightthickness=0)
-        self.video_canvas.pack(pady=5, padx=10)
+        self.video_canvas.pack(pady=5, padx=10, fill=tk.BOTH, expand=True)
         
         video_controls = tk.Frame(video_card, bg=self.colors['bg_primary'])
         video_controls.pack(pady=10, padx=10, fill=tk.X)
@@ -565,8 +670,9 @@ class VideoAnnotatorGUI:
                                fg=self.colors['text_primary'])
         canvas_label.pack()
         
-        self.canvas_width = 1920 // 2
-        self.canvas_height = 1080 // 2
+        # Change canva size
+        self.canvas_width = 2560 // 2 #1920 // 2
+        self.canvas_height = 1440 // 2 #1080 // 2
         
         canvas_frame = tk.Frame(right_panel, bg=self.colors['bg_primary'], relief=tk.FLAT)
         canvas_frame.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -1210,7 +1316,11 @@ class VideoAnnotatorGUI:
             self.detection_img_original = Image.open(self.detection_img_path)
             
             # Calculate zoomed size
-            base_width, base_height = 350, 250
+            self.detection_canvas.update_idletasks()
+            base_width = int(self.detection_canvas.winfo_width())
+            base_height = int(self.detection_canvas.winfo_height())
+            if base_width <= 1 or base_height <= 1:
+                base_width, base_height = 350, 250
             zoomed_width = int(base_width * self.detection_zoom)
             zoomed_height = int(base_height * self.detection_zoom)
             
@@ -1220,18 +1330,20 @@ class VideoAnnotatorGUI:
             
             self.detection_canvas.delete("all")
             # Place image with pan offset (default center if not zoomed)
+            canvas_center_x = base_width // 2
+            canvas_center_y = base_height // 2
             if self.detection_zoom <= 1.0:
                 # If zoomed out, center the image
-                canvas_center_x = 175
-                canvas_center_y = 125
+                canvas_center_x = base_width // 2
+                canvas_center_y = base_height // 2
             else:
                 # If zoomed in, use pan offset (default to center if not yet panned)
                 if self.detection_pan_x == 0 and self.detection_pan_y == 0:
-                    canvas_center_x = 175
-                    canvas_center_y = 125
+                    canvas_center_x = base_width // 2
+                    canvas_center_y = base_height // 2
                 else:
-                    canvas_center_x = 175 + self.detection_pan_x
-                    canvas_center_y = 125 + self.detection_pan_y
+                    canvas_center_x = (base_width // 2) + self.detection_pan_x
+                    canvas_center_y = (base_height // 2) + self.detection_pan_y
             
             self.detection_canvas.create_image(canvas_center_x, canvas_center_y, 
                                              anchor=tk.CENTER, image=self.detection_photo)
@@ -1244,7 +1356,12 @@ class VideoAnnotatorGUI:
                                                 font=('Segoe UI', 9, 'bold'))
         else:
             self.detection_canvas.delete("all")
-            self.detection_canvas.create_text(175, 125, text="No detection image", fill="white")
+            self.detection_canvas.update_idletasks()
+            w = int(self.detection_canvas.winfo_width())
+            h = int(self.detection_canvas.winfo_height())
+            if w <= 1 or h <= 1:
+                w, h = 350, 250
+            self.detection_canvas.create_text(w // 2, h // 2, text="No detection image", fill="white")
     
     def load_video_player(self):
         """Initialize video player"""
@@ -1274,9 +1391,22 @@ class VideoAnnotatorGUI:
     
     def display_video_frame(self, frame):
         """Display a frame in the video canvas with timestamp"""
+        # Keep last shown frame for responsive redraws
+        try:
+            self.last_video_frame = frame.copy()
+        except Exception:
+            self.last_video_frame = frame
+
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(frame_rgb)
-        img = img.resize((350, 250), Image.Resampling.LANCZOS)
+
+        self.video_canvas.update_idletasks()
+        canvas_w = int(self.video_canvas.winfo_width())
+        canvas_h = int(self.video_canvas.winfo_height())
+        if canvas_w <= 1 or canvas_h <= 1:
+            canvas_w, canvas_h = 350, 250
+
+        img = img.resize((canvas_w, canvas_h), Image.Resampling.LANCZOS)
         self.video_photo = ImageTk.PhotoImage(img)
         self.video_canvas.delete("all")
         self.video_canvas.create_image(0, 0, anchor=tk.NW, image=self.video_photo)
@@ -1305,8 +1435,68 @@ class VideoAnnotatorGUI:
                 # Display timestamp on video during playback
                 if self.video_playing:
                     timestamp = f"{current_min:02d}:{current_sec_rem:02d}"
-                    self.video_canvas.create_text(340, 240, text=timestamp, fill="yellow", anchor=tk.SE,
+                    self.video_canvas.create_text(canvas_w - 10, canvas_h - 10, text=timestamp, fill="yellow", anchor=tk.SE,
                                                  font=('Segoe UI', 10, 'bold'))
+
+    def refit_current_frame_to_canvas(self, preserve_view: bool = True):
+        """Refit the currently displayed annotation frame to the canvas size.
+
+        This is used for window resizing and MUST NOT reload annotations from disk,
+        otherwise it can discard unsaved boxes.
+        """
+        if not hasattr(self, "current_frame_original"):
+            return
+        if not hasattr(self, "frame_width") or not hasattr(self, "frame_height"):
+            return
+        if not hasattr(self, "frame_canvas"):
+            return
+
+        old_min_zoom = getattr(self, "min_zoom", 1.0)
+
+        self.frame_canvas.update_idletasks()
+        canvas_width = max(int(self.frame_canvas.winfo_width()), 100)
+        canvas_height = max(int(self.frame_canvas.winfo_height()), 100)
+
+        img = Image.fromarray(self.current_frame_original)
+
+        aspect_ratio = self.frame_width / self.frame_height
+        canvas_aspect = canvas_width / canvas_height
+        if aspect_ratio > canvas_aspect:
+            display_width = canvas_width
+            display_height = int(canvas_width / aspect_ratio)
+        else:
+            display_height = canvas_height
+            display_width = int(canvas_height * aspect_ratio)
+
+        self.display_width = max(1, int(display_width))
+        self.display_height = max(1, int(display_height))
+
+        self.base_scale_x = self.display_width / float(self.frame_width)
+        self.base_scale_y = self.display_height / float(self.frame_height)
+
+        # Update min zoom based on new display size
+        fit_zoom_width = canvas_width / self.display_width
+        fit_zoom_height = canvas_height / self.display_height
+        self.min_zoom = min(fit_zoom_width, fit_zoom_height)
+
+        self.base_display_img = img.resize((self.display_width, self.display_height), Image.Resampling.LANCZOS)
+
+        # Invalidate zoom cache
+        self.cached_zoomed_img = None
+        self.cached_zoom_level = None
+
+        if preserve_view:
+            # If user was at "fit" zoom previously, keep fit zoom and re-center.
+            if not hasattr(self, "zoom_level") or abs(float(self.zoom_level) - float(old_min_zoom)) < 1e-6:
+                self.zoom_level = self.min_zoom
+                self.center_image()
+            else:
+                self.zoom_level = max(float(self.zoom_level), float(self.min_zoom))
+        else:
+            self.zoom_level = self.min_zoom
+            self.center_image()
+
+        self.update_zoomed_image()
 
     
     def play_video(self):
@@ -1707,6 +1897,7 @@ class VideoAnnotatorGUI:
     def prev_frame(self, event):
         """Go to previous frame"""
         self.save_current_frame_annotations()
+        self.current_bboxes = []  # Clear bboxes immediately to prevent copying
         
         if self.current_frame_idx > 0:
             self.current_frame_idx -= 1

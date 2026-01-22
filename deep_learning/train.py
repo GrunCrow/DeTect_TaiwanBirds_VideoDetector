@@ -6,7 +6,7 @@ import wandb
 from PRIVATE import WANDB_API_KEY
 
 # EXP_NAME = "yolov11n-no_aug-DeTect500-v1"
-EXP_NAME = "yolov26n-default-singlecls-bgundersampled-DeTect700-v1"
+EXP_NAME = "yolov26s-default-singlecls-bgundersampled-DeTect700-v1"
 
 def main():
     # ap = argparse.ArgumentParser(description="Train YOLOv11 with Ultralytics")
@@ -29,7 +29,7 @@ def main():
     wandb.login(key=WANDB_API_KEY)
 
     # Load a model
-    model = YOLO("yolo26n.pt")  # load a pretrained model (recommended for training)
+    model = YOLO("yolo26s.pt")  # load a pretrained model (recommended for training)
 
     # set cfg.yaml parameters
     # model.cfg.data = 'datasets/DeTect.yaml'  # path to data.yaml
@@ -39,10 +39,10 @@ def main():
         data = 'cfg/datasets/DeTect.yaml',
         project = 'DeTect-BMMS',
         name = f'runs/{EXP_NAME}',
-        epochs = 500,
-        patience = 50,
+        device = 0, # use GPU 0
+        epochs = 1500,
+        patience = 250,
         single_cls = True,
-        # single_cls = False, ---- next experiment
         # classes = [1],  # only these classes will be used for training - 1 = Bird
         batch = 16,
         optimizer = "auto",

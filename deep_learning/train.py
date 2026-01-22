@@ -104,6 +104,12 @@ def main():
         plots=True
     )
 
+    # Save validation metrics to a text file
+    val_metrics_path = Path(f"runs/val/{EXP_NAME}/val_metrics.txt")
+    val_metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(val_metrics_path, 'w') as f:
+        f.write(str(val_metrics))
+
     print("\n------------------------------------------------------------------------\n")
     # print("\nValidation metrics:\n")
     # print(val_metrics)
@@ -121,6 +127,12 @@ def main():
         conf=0.1,
         plots=True
     )
+
+    # Save test metrics to a text file
+    test_metrics_path = Path(f"runs/test/{EXP_NAME}/test_metrics.txt")
+    test_metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(test_metrics_path, 'w') as f:
+        f.write(str(test_metrics))
 
     print("\n------------------------------------------------------------------------\n")
     # print("\nTest metrics:\n")

@@ -105,4 +105,8 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: botsort.yaml
+<<<<<<< HEAD
 save_dir: /home/detect/DeTect_TaiwanBirds_VideoDetector/deep_learning/DeTect-BMMS/runs/yolov26s-default-singlecls-bgundersampled-DeTect700-v1
+=======
+save_dir: F:\DeTect_TaiwanBirds_VideoDetector\deep_learning\DeTect-BMMS\runs\yolov26s-default-singlecls-bgundersampled-DeTect700-v1
+>>>>>>> 6ae026a25a58258c1a9aa47732bdff444eee0d69

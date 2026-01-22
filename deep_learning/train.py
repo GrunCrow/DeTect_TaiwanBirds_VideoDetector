@@ -6,7 +6,7 @@ import wandb
 from PRIVATE import WANDB_API_KEY
 
 # EXP_NAME = "yolov11n-no_aug-DeTect500-v1"
-EXP_NAME = "yolov26s-default-singlecls-bgundersampled-DeTect700-v1"
+EXP_NAME = "yolov26s-default-singlecls-bgundersampled-DeTect1000v1_"
 
 def main():
     # ap = argparse.ArgumentParser(description="Train YOLOv11 with Ultralytics")
@@ -117,25 +117,25 @@ def main():
     print("\n------------------------------------------------------------------------\n")
 
     # ---------------------------------- Testing ----------------------------------
-    test_metrics = model.val(
-        data = 'cfg/datasets/DeTect.yaml',
-        split = 'test',
-        project = 'DeTect-BMMS',
-        name = f'runs/test/{EXP_NAME}',
-        single_cls = True,
-        save_json=True,
-        conf=0.1,
-        plots=True
-    )
+    # test_metrics = model.val(
+    #     data = 'cfg/datasets/DeTect.yaml',
+    #     split = 'test',
+    #     project = 'DeTect-BMMS',
+    #     name = f'runs/test/{EXP_NAME}',
+    #     single_cls = True,
+    #     save_json=True,
+    #     conf=0.1,
+    #     plots=True
+    # )
 
-    # Save test metrics to a text file
-    test_metrics_path = Path(f"runs/test/{EXP_NAME}/test_metrics.txt")
-    test_metrics_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(test_metrics_path, 'w') as f:
-        f.write(str(test_metrics))
+    # # Save test metrics to a text file
+    # test_metrics_path = Path(f"runs/test/{EXP_NAME}/test_metrics.txt")
+    # test_metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    # with open(test_metrics_path, 'w') as f:
+    #     f.write(str(test_metrics))
 
-    print("\n------------------------------------------------------------------------\n")
-    # print("\nTest metrics:\n")
+    # print("\n------------------------------------------------------------------------\n")
+    # # print("\nTest metrics:\n")
     # print(test_metrics)
     
     

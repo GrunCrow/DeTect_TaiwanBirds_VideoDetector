@@ -1,0 +1,9 @@
+{
+  "split_name": "test",
+  "total_images": 3146,
+  "num_background": 2928,
+  "num_target": 218,
+  "background_ratio": 93.07056579783853,
+  "target_ratio": 6.929434202161475,
+  "num_videos": 296
+}

@@ -1,0 +1,11 @@
+{
+  "split_name": "train_80-20",
+  "split_type": "train",
+  "ratio": "80-20",
+  "total_images": 5840,
+  "num_background": 4672,
+  "num_target": 1168,
+  "background_ratio": 80.0,
+  "target_ratio": 20.0,
+  "num_videos": 1402
+}

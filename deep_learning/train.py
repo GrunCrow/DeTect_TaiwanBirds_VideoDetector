@@ -4,11 +4,20 @@ from ultralytics import YOLO
 import random
 import wandb
 from PRIVATE import WANDB_API_KEY
+import os
+import torch
 
 # EXP_NAME = "yolov11n-no_aug-DeTect500-v1"
-EXP_NAME = "yolov26s-default-singlecls-bgundersampled-DeTect1000v1_"
+EXP_NAME = "yolov26s-default-lr-singlecls-bgundersampled-DeTect1000v1_"
 
 def main():
+    # Enable memory optimization to prevent fragmentation
+    os.environ['PYTORCH_ALLOC_CONF'] = 'expandable_segments:True'
+    
+    # Additional memory optimization
+    torch.cuda.empty_cache()
+    if torch.cuda.is_available():
+        torch.cuda.reset_peak_memory_stats()
     # ap = argparse.ArgumentParser(description="Train YOLOv11 with Ultralytics")
     # # ap.add_argument('--data', required=True, help='Path to data.yaml file')
     # ap.add_argument('--model', default='yolov11n.pt', help='YOLOv11 model checkpoint (e.g., yolov11n.pt)')
@@ -30,6 +39,9 @@ def main():
 
     # Load a model
     model = YOLO("yolo26s.pt")  # load a pretrained model (recommended for training)
+    
+    # Clear cache before training starts
+    torch.cuda.empty_cache()
 
     # set cfg.yaml parameters
     # model.cfg.data = 'datasets/DeTect.yaml'  # path to data.yaml
@@ -40,24 +52,23 @@ def main():
         project = 'DeTect-BMMS',
         name = f'runs/{EXP_NAME}',
         device = 0, # use GPU 0
-        epochs = 1500,
-        patience = 250,
+        epochs = 200,
+        patience = 50,
         single_cls = True,
         # classes = [1],  # only these classes will be used for training - 1 = Bird
         batch = 16,
         optimizer = "auto",
         # resume = False,
-        # imgsz = 640,
+        imgsz = 640, # 640
         # optimizer = 'auto',
         # deterministic = True,
-        # single_cls = False,
-        # cos_lr = False,
+        cos_lr = True,
         # close_mosaic = 10,
         # dropout = 0.0,
 
         # Hyperparameters
-        # lr0 = 0.01,
-        # lrf = 0.01,
+        lr0 = 0.01,
+        lrf = 0.0001,
         # momentum = 0.937,
         # weight_decay = 0.0005,
         # warmup_epochs = 3.0,
@@ -87,34 +98,34 @@ def main():
         # erasing = 0 # 0.4 # ---- change
         )
 
-    print(results)
+    # print(results)
 
-    # ---------------------------------- Validation ----------------------------------
+    # # ---------------------------------- Validation ----------------------------------
 
-    print("\n------------------------------------------------------------------------\n")
+    # print("\n------------------------------------------------------------------------\n")
 
-    # run best model in val
-    val_metrics = model.val(
-        data = 'cfg/datasets/DeTect.yaml',
-        split = 'val',
-        project = 'DeTect-BMMS',
-        name = f'runs/val/{EXP_NAME}',
-        single_cls = True,
-        save_json=True,
-        plots=True
-    )
+    # # run best model in val
+    # val_metrics = model.val(
+    #     data = 'cfg/datasets/DeTect.yaml',
+    #     split = 'val',
+    #     project = 'DeTect-BMMS',
+    #     name = f'runs/val/{EXP_NAME}',
+    #     single_cls = True,
+    #     save_json=True,
+    #     plots=True
+    # )
 
-    # Save validation metrics to a text file
-    val_metrics_path = Path(f"runs/val/{EXP_NAME}/val_metrics.txt")
-    val_metrics_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(val_metrics_path, 'w') as f:
-        f.write(str(val_metrics))
+    # # Save validation metrics to a text file
+    # val_metrics_path = Path(f"runs/val/{EXP_NAME}/val_metrics.txt")
+    # val_metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    # with open(val_metrics_path, 'w') as f:
+    #     f.write(str(val_metrics))
 
-    print("\n------------------------------------------------------------------------\n")
-    # print("\nValidation metrics:\n")
-    # print(val_metrics)
+    # print("\n------------------------------------------------------------------------\n")
+    # # print("\nValidation metrics:\n")
+    # # print(val_metrics)
 
-    print("\n------------------------------------------------------------------------\n")
+    # print("\n------------------------------------------------------------------------\n")
 
     # ---------------------------------- Testing ----------------------------------
     # test_metrics = model.val(

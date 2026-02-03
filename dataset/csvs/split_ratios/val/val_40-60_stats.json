@@ -1,0 +1,11 @@
+{
+  "split_name": "val_40-60",
+  "split_type": "val",
+  "ratio": "40-60",
+  "total_images": 418,
+  "num_background": 167,
+  "num_target": 251,
+  "background_ratio": 39.952153110047846,
+  "target_ratio": 60.04784688995215,
+  "num_videos": 309
+}

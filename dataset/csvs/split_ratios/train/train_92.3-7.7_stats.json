@@ -1,0 +1,11 @@
+{
+  "split_name": "train_92.3-7.7",
+  "split_type": "train",
+  "ratio": "92.3-7.7",
+  "total_images": 15197,
+  "num_background": 14029,
+  "num_target": 1168,
+  "background_ratio": 92.31427255379351,
+  "target_ratio": 7.685727446206488,
+  "num_videos": 1402
+}

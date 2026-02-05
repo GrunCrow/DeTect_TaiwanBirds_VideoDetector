@@ -2,3 +2,4 @@ deep_learning/PRIVATE.py
 *.pt
 */wandb/*
 */runs/*
+deep_learning/DeTect-BMMS/*

@@ -8,7 +8,7 @@ import os
 import torch
 
 # EXP_NAME = "yolov11n-no_aug-DeTect500-v1"
-EXP_NAME = "yolov26s-default-lr-singlecls-bgundersampled-DeTect1000v1_"
+EXP_NAME = "yolov26s-default-DeTect2000"
 
 def main():
     # Enable memory optimization to prevent fragmentation
@@ -35,10 +35,10 @@ def main():
     #     raise FileNotFoundError(f"data.yaml not found: {data_path}")
         
     # Initialize Weights & Biases environment
-    wandb.login(key=WANDB_API_KEY)
+    # wandb.login(key=WANDB_API_KEY)
 
     # Load a model
-    model = YOLO("yolo26s.pt")  # load a pretrained model (recommended for training)
+    model = YOLO("yolo26n.pt")  # load a pretrained model (recommended for training)
     
     # Clear cache before training starts
     torch.cuda.empty_cache()
@@ -52,23 +52,23 @@ def main():
         project = 'DeTect-BMMS',
         name = f'runs/{EXP_NAME}',
         device = 0, # use GPU 0
-        epochs = 200,
+        epochs = 400,
         patience = 50,
         single_cls = True,
         # classes = [1],  # only these classes will be used for training - 1 = Bird
-        batch = 16,
+        batch = 32,
         optimizer = "auto",
         # resume = False,
         imgsz = 640, # 640
         # optimizer = 'auto',
         # deterministic = True,
-        cos_lr = True,
+        # cos_lr = True,
         # close_mosaic = 10,
         # dropout = 0.0,
 
         # Hyperparameters
-        lr0 = 0.01,
-        lrf = 0.0001,
+        # lr0 = 0.01,
+        # lrf = 0.0001,
         # momentum = 0.937,
         # weight_decay = 0.0005,
         # warmup_epochs = 3.0,

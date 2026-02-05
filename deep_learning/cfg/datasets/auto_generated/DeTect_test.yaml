@@ -1,0 +1,10 @@
+path: /home/detect/DeTect_TaiwanBirds_VideoDetector/dataset/csvs
+test: split_ratios/test/test.txt
+names:
+  0: bat
+  1: bird
+  2: insect
+  3: drone
+  4: plane
+  5: other
+  6: unknown

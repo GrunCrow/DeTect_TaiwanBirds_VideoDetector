@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union, Optional
 import cv2
 
 
@@ -205,7 +205,23 @@ def load_predictions_grouped(predictions_path):
     return grouped
 
 
-def basic_statistics(predictions):
+def basic_statistics(
+    predictions,
+    save_plot_dir: Union[str, Path, None] = None,
+    conf_threshold: Optional[float] = None,
+    title_suffix: str = "",
+    include_cumulative: bool = True
+):
+    """
+    Analyze and print basic statistics about detections and confidence scores.
+    
+    Args:
+        predictions: Dictionary of predictions grouped by image
+        save_plot_dir: Optional directory to save confidence distribution plots
+        conf_threshold: Optional confidence threshold for filtering scores
+        title_suffix: Optional suffix for plot titles
+        include_cumulative: Whether to include cumulative distribution plot
+    """
     # Basic statistics about detections
     if predictions:
         # Count total detections from flattened structure
@@ -241,7 +257,8 @@ def basic_statistics(predictions):
                     # Handle different possible key names for confidence
                     conf = pred.get('confidence') or pred.get('score') or pred.get('conf')
                     if conf is not None:
-                        all_confidences.append(conf)
+                        if conf_threshold is None or conf >= conf_threshold:
+                            all_confidences.append(conf)
         
         if all_confidences:
             print(f"\n--- Confidence Scores ---")
@@ -264,36 +281,51 @@ def basic_statistics(predictions):
                     print(f"Available keys: {first_detection.keys()}")
     
     if all_confidences:
-        fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+        if include_cumulative:
+            fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+        else:
+            fig, axes = plt.subplots(1, 1, figsize=(15, 5))
         
         # Histogram
-        ax = axes[0]
+        ax = axes[0] if include_cumulative else axes
         ax.hist(all_confidences, bins=50, alpha=0.7, color='blue', edgecolor='black')
         ax.axvline(np.mean(all_confidences), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(all_confidences):.3f}')
         ax.axvline(np.median(all_confidences), color='green', linestyle='--', linewidth=2, label=f'Median: {np.median(all_confidences):.3f}')
-        ax.axvline(0.5, color='orange', linestyle='--', linewidth=2, label='Threshold: 0.5')
         ax.set_xlabel('Confidence Score')
         ax.set_ylabel('Frequency')
-        ax.set_title('Confidence Score Distribution (Validation)')
+        hist_title = 'Confidence Score Distribution'
+        if title_suffix:
+            hist_title += f' - {title_suffix}'
+        ax.set_title(hist_title)
         ax.legend()
         ax.grid(True, alpha=0.3)
         
         # Cumulative Distribution
-        ax = axes[1]
-        sorted_conf = np.sort(all_confidences)
-        cumulative = np.arange(1, len(sorted_conf) + 1) / len(sorted_conf)
-        ax.plot(sorted_conf, cumulative, linewidth=2)
-        ax.axvline(0.5, color='orange', linestyle='--', linewidth=2, label='Threshold: 0.5')
-        ax.set_xlabel('Confidence Score')
-        ax.set_ylabel('Cumulative Probability')
-        ax.set_title('Cumulative Distribution')
-        ax.grid(True, alpha=0.3)
-        ax.legend()
+        if include_cumulative:
+            ax = axes[1]
+            sorted_conf = np.sort(all_confidences)
+            cumulative = np.arange(1, len(sorted_conf) + 1) / len(sorted_conf)
+            ax.plot(sorted_conf, cumulative, linewidth=2)
+            ax.set_xlabel('Confidence Score')
+            ax.set_ylabel('Cumulative Probability')
+            cum_title = 'Cumulative Distribution'
+            if title_suffix:
+                cum_title += f' - {title_suffix}'
+            ax.set_title(cum_title)
+            ax.grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(RESULTS_DIR / 'val_confidence_distribution.png', dpi=150, bbox_inches='tight')
+        
+        if save_plot_dir:
+            save_plot_dir = Path(save_plot_dir)
+            save_plot_dir.mkdir(parents=True, exist_ok=True)
+            filename = 'confidence_distribution'
+            if conf_threshold is not None:
+                filename += f'_conf_{conf_threshold:.2f}'
+            save_path = save_plot_dir / f'{filename}.png'
+            plt.savefig(save_path, dpi=150, bbox_inches='tight')
+            print(f"✓ Confidence distribution plots saved to {save_path}")
         plt.show()
-        print("✓ Confidence distribution plots saved")
         
         # Count predictions by confidence range
         print("\n--- Predictions by Confidence Range ---")
@@ -842,6 +874,192 @@ def visualize_tp_fp_fn_analysis(results: Dict, save_path: Union[str, Path], titl
     print(f"\n✓ Visualization saved to: {save_path}")
 
 
+def _compute_metrics_for_thresholds(
+    predictions_list: List,
+    images_paths: List[str],
+    iou_threshold: float,
+    single_class: bool,
+    thresholds: np.ndarray,
+    verbose: bool = True
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    OPTIMIZED: Process predictions and labels ONCE, then compute metrics for all thresholds.
+    This is 99x faster than calling analyze_tp_fp_fn() 99 times.
+    
+    Args:
+        predictions_list: Loaded predictions from JSON
+        images_paths: List of image paths
+        iou_threshold: IoU threshold for matching
+        single_class: If True, ignore class labels
+        thresholds: Array of confidence thresholds to test
+        verbose: Print progress
+        
+    Returns:
+        Tuple of (valid_thresholds, precision_vals, recall_vals)
+    """
+    import cv2
+    
+    # Helper function to check if box is normalized
+    def _scale_xyxy_if_needed(box: List[float], w: int, h: int) -> List[float]:
+        if max(box) <= 1.5:
+            return [box[0] * w, box[1] * h, box[2] * w, box[3] * h]
+        return box
+    
+    # STEP 1: Load and process all predictions and labels ONCE
+    all_detections = []  # List of {conf, class, box, img_path, img_dims}
+    all_gt_boxes = []    # List of {class, box, img_path}
+    total_gt_boxes = 0
+    
+    has_embedded_paths = bool(
+        predictions_list
+        and isinstance(predictions_list[0], dict)
+        and "image" in predictions_list[0]
+    )
+    
+    if verbose:
+        print("  Loading predictions and ground truth labels...")
+    
+    for idx, pred_item in enumerate(predictions_list):
+        # Get image path
+        if has_embedded_paths and isinstance(pred_item, dict):
+            img_path = pred_item.get("image")
+            pred_detections = pred_item.get("predictions", pred_item)
+        else:
+            if idx < len(images_paths):
+                img_path = images_paths[idx]
+                pred_detections = pred_item
+            else:
+                continue
+                
+        if not img_path:
+            continue
+        
+        img_path = Path(img_path)
+        
+        # Get image dimensions - load image ONLY ONCE
+        if img_path.exists():
+            img = cv2.imread(str(img_path))
+            if img is None:
+                continue
+            img_height, img_width = img.shape[:2]
+        else:
+            continue
+        
+        # Load GT labels
+        label_path = Path(str(img_path).replace('images', 'labels')).with_suffix('.txt')
+        gt_labels = load_yolo_labels(label_path)
+        
+        # Add GT boxes
+        for gt in gt_labels:
+            gt_box_abs = yolo_to_xyxy(gt[1:5], img_width, img_height)
+            gt_box_abs = _scale_xyxy_if_needed(gt_box_abs, img_width, img_height)
+            all_gt_boxes.append({
+                'class': int(gt[0]),
+                'box': gt_box_abs,
+                'img_path': str(img_path),
+                'img_dims': (img_width, img_height)
+            })
+            total_gt_boxes += 1
+        
+        # Add predictions
+        if isinstance(pred_detections, list):
+            pred_boxes = pred_detections
+        elif isinstance(pred_detections, dict):
+            pred_boxes = pred_detections.get('boxes', pred_detections.get('detections', []))
+        else:
+            pred_boxes = []
+        
+        for pred in pred_boxes:
+            if not isinstance(pred, dict):
+                continue
+            
+            conf = pred.get('confidence') or pred.get('conf') or pred.get('score', 0)
+            pred_class = pred.get('class') or pred.get('class_id')
+            
+            # Get box
+            if 'box' in pred:
+                box_data = pred['box']
+                if isinstance(box_data, dict):
+                    pred_box = [box_data['x1'], box_data['y1'], box_data['x2'], box_data['y2']]
+                else:
+                    continue
+            elif 'bbox' in pred:
+                bbox = pred['bbox']
+                if len(bbox) == 4:
+                    pred_box = [bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3]]
+                else:
+                    continue
+            else:
+                continue
+            
+            pred_box = _scale_xyxy_if_needed(pred_box, img_width, img_height)
+            
+            all_detections.append({
+                'confidence': conf,
+                'class': pred_class,
+                'box': pred_box,
+                'img_path': str(img_path)
+            })
+    
+    if verbose:
+        print(f"  Loaded {len(all_detections)} detections, {total_gt_boxes} GT boxes")
+    
+    # STEP 2: For each threshold, compute metrics (no reloading data!)
+    precision_vals = []
+    recall_vals = []
+    valid_thresholds = []
+    
+    for conf_thresh in thresholds:
+        # Filter detections by confidence
+        filtered_dets = [d for d in all_detections if d['confidence'] >= conf_thresh]
+        
+        # Match predictions to GT
+        tp_count = 0
+        fp_count = 0
+        fn_count = total_gt_boxes
+        
+        matched_gt = set()
+        
+        for pred in filtered_dets:
+            pred_box = pred['box']
+            pred_class = pred['class']
+            pred_img = pred['img_path']
+            
+            # Find matching GT boxes in same image
+            best_iou = 0
+            best_gt_idx = -1
+            
+            for gt_idx, gt in enumerate(all_gt_boxes):
+                if gt['img_path'] != pred_img or gt_idx in matched_gt:
+                    continue
+                if not single_class and pred_class is not None and pred_class != gt['class']:
+                    continue
+                
+                iou = compute_iou(pred_box, gt['box'])
+                if iou > best_iou:
+                    best_iou = iou
+                    best_gt_idx = gt_idx
+            
+            # Classify
+            if best_iou >= iou_threshold:
+                tp_count += 1
+                matched_gt.add(best_gt_idx)
+                fn_count -= 1
+            else:
+                fp_count += 1
+        
+        # Compute metrics
+        precision = tp_count / (tp_count + fp_count) if (tp_count + fp_count) > 0 else 0
+        recall = tp_count / (total_gt_boxes) if total_gt_boxes > 0 else 0
+        
+        if precision > 0 or recall > 0:  # Only valid if we have some detections
+            precision_vals.append(precision)
+            recall_vals.append(recall)
+            valid_thresholds.append(conf_thresh)
+    
+    return np.array(valid_thresholds), np.array(precision_vals), np.array(recall_vals)
+
+
 def find_optimal_confidence_threshold(
     predictions_json_path: Union[str, Path],
     images_list_path: Union[str, Path],
@@ -849,11 +1067,12 @@ def find_optimal_confidence_threshold(
     single_class: bool = False,
     num_thresholds: int = 99,
     verbose: bool = True
-) -> Dict:
+) -> Optional[Dict]:
     """
     Find optimal confidence threshold where precision and recall are balanced.
-    Sweeps through confidence thresholds to find the first meaningful crossing
-    where precision equals recall.
+    
+    OPTIMIZED: Processes predictions and labels ONCE, then computes metrics for all
+    thresholds. ~99x faster than calling analyze_tp_fp_fn() 99 times.
     
     Args:
         predictions_json_path: Path to predictions JSON file
@@ -878,43 +1097,41 @@ def find_optimal_confidence_threshold(
         print(f"FINDING OPTIMAL CONFIDENCE THRESHOLD")
         print(f"  IoU threshold: {iou_threshold}")
         print(f"  Testing {num_thresholds} thresholds from 0.01 to 0.99")
+        # print(f"  Processing predictions/labels ONCE (fast!)")
         print(f"{'='*80}")
     
+    predictions_json_path = Path(predictions_json_path)
+    
+    # Load predictions
+    with open(predictions_json_path, 'r') as f:
+        predictions_list = json.load(f)
+    
+    # Load images list
+    images_paths = []
+    if images_list_path:
+        images_list_path = Path(images_list_path)
+        if images_list_path.exists():
+            with open(images_list_path, 'r') as f:
+                images_paths = [line.strip() for line in f if line.strip()]
+    
     thresholds = np.linspace(0.01, 0.99, num_thresholds)
-    precision_vals = []
-    recall_vals = []
-    valid_thresholds = []
     
-    for conf in thresholds:
-        res = analyze_tp_fp_fn(
-            predictions_json_path=predictions_json_path,
-            images_list_path=images_list_path,
-            iou_threshold=iou_threshold,
-            conf_threshold=float(conf),
-            single_class=single_class,
-            verbose=False,
-        )
-        if res is None:
-            continue
-        precision = res.get("precision")
-        recall = res.get("recall")
-        if precision is None or recall is None:
-            continue
-        precision_vals.append(precision)
-        recall_vals.append(recall)
-        valid_thresholds.append(float(conf))
+    # OPTIMIZED: Load all data once and compute metrics for all thresholds
+    valid_thresholds, precision_vals, recall_vals = _compute_metrics_for_thresholds(
+        predictions_list,
+        images_paths,
+        iou_threshold,
+        single_class,
+        thresholds,
+        verbose=verbose
+    )
     
-    if not valid_thresholds:
+    if not len(valid_thresholds):
         if verbose:
             print("✗ No valid precision/recall results.")
         return None
     
-    precision_vals = np.array(precision_vals)
-    recall_vals = np.array(recall_vals)
-    valid_thresholds = np.array(valid_thresholds)
-    
     # Find the first meaningful crossing between precision and recall
-    # Filter out points where both precision and recall are too low (< 0.1)
     diff = precision_vals - recall_vals
     meaningful_mask = (precision_vals > 0.1) & (recall_vals > 0.1)
     
@@ -1008,8 +1225,8 @@ def plot_precision_recall_curve(
     
     # Plot 1: Precision/Recall vs Confidence
     ax = axes[0]
-    ax.plot(thresholds, precisions, label="Precision", linewidth=2, color='blue')
-    ax.plot(thresholds, recalls, label="Recall", linewidth=2, color='purple')
+    ax.plot(thresholds, precisions, label="Precision", linewidth=2, color='C0')
+    ax.plot(thresholds, recalls, label="Recall", linewidth=2, color='C1')
     ax.axvline(best_conf, color="black", linestyle="--", linewidth=2, 
                label=f"Optimal = {best_conf:.3f}")
     ax.set_xlabel("Confidence Threshold")
@@ -1051,6 +1268,7 @@ def analyze_with_optimal_threshold(
     iou_threshold: float = 0.5,
     single_class: bool = False,
     save_dir: Union[str, Path] = None,
+    plot_confidence: bool = False,
     verbose: bool = True
 ) -> Dict:
     """
@@ -1069,6 +1287,7 @@ def analyze_with_optimal_threshold(
         iou_threshold: IoU threshold for matching (default: 0.5)
         single_class: If True, ignore class labels (default: False)
         save_dir: Directory to save plots (optional)
+        plot_confidence: Whether to plot confidence distributions (default: True)
         verbose: Print detailed progress (default: True)
         
     Returns:
@@ -1135,7 +1354,7 @@ def analyze_with_optimal_threshold(
         verbose=verbose
     )
     
-    # Step 4: Generate visualizations if save_dir provided
+    # Step 4: Generate visualizations
     if save_dir:
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -1163,6 +1382,22 @@ def analyze_with_optimal_threshold(
         
         # Create comparison plot
         _plot_low_vs_optimal_comparison(results_low, results_optimal, save_dir)
+
+    if plot_confidence:
+        grouped = load_predictions_grouped(Path(predictions_json_path))
+        if grouped:
+            basic_statistics(
+                grouped,
+                save_plot_dir=save_dir,
+                conf_threshold=0.01,
+                title_suffix="Low Threshold (0.01)"
+            )
+            basic_statistics(
+                grouped,
+                save_plot_dir=save_dir,
+                conf_threshold=optimal_info['best_conf'],
+                title_suffix=f"Optimal ({optimal_info['best_conf']:.3f})"
+            )
     
     # Step 5: Print final comparison
     if verbose:
